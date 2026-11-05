@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f5" />
+    <title>Overview — Bistek Village</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="bg-canvas font-sans text-ink antialiased" data-page="overview">
+    <div id="app-shell"></div>
+    <div id="page-content" class="hidden">
+      <section>
+        <div class="page-heading">
+          <div><p class="eyebrow">YOUR COMMUNITY AT A GLANCE</p><h1>Welcome back, Admin <span class="wave">✳</span></h1><p class="heading-subtitle">Here’s what’s happening in your community this month.</p></div>
+          <div class="heading-actions"><a class="button button-secondary" href="reports.html">View reports</a><button class="button button-primary" data-open-add><span>＋</span> Add resident</button></div>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Total residents</span><span class="stat-icon stat-icon-green">⌂</span></div><div class="stat-value" id="stat-residents">0</div><div class="stat-foot"><span class="stat-note">Across your community</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Collected this month</span><span class="stat-icon stat-icon-yellow">₱</span></div><div class="stat-value" id="stat-collected">₱0</div><div class="stat-foot"><span class="trend-pill" id="collected-count">0 paid</span><span class="stat-note">of <span id="stat-total">₱0</span> expected</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Still outstanding</span><span class="stat-icon stat-icon-peach">◷</span></div><div class="stat-value" id="stat-outstanding">₱0</div><div class="stat-foot"><span class="outstanding-note" id="outstanding-count">0 residents</span><span class="stat-note">need follow-up</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Collection rate</span><span class="stat-icon stat-icon-blue">↗</span></div><div class="stat-value"><span id="stat-rate">0</span><small class="percent-sign">%</small></div><div class="progress-track"><span id="collection-progress"></span></div></article>
+        </div>
+        <div class="content-grid">
+          <section class="panel payments-panel"><div class="panel-heading"><div><p class="eyebrow">THIS MONTH</p><h2>Recent dues payments</h2></div><a class="text-link" href="payments.html">View all <span>→</span></a></div><div class="table-wrap"><table><thead><tr><th>RESIDENT</th><th>PROPERTY</th><th>MONTHLY DUES</th><th>STATUS</th><th></th></tr></thead><tbody id="overview-table"></tbody></table></div><div class="empty-state hidden" id="overview-empty">No residents yet. Add your first resident to get started.</div></section>
+          <section class="panel collection-panel"><div class="panel-heading"><div><p class="eyebrow">COLLECTION OVERVIEW</p><h2>Monthly progress</h2></div><span class="period-chip" id="period-chip"></span></div><div class="collection-summary"><span>Collected so far</span><strong id="collection-summary-amount">₱0</strong><small id="collection-summary-caption">0 of 0 residents have paid</small></div><div class="collection-bar"><span id="collection-bar-fill"></span></div><div class="bar-legend"><span><i class="legend-dot paid-dot"></i>Paid <b id="legend-paid">0</b></span><span><i class="legend-dot due-dot"></i>Pending <b id="legend-due">0</b></span></div><div class="collection-divider"></div><div class="reminder-box"><span class="reminder-icon">✳</span><span><strong id="reminder-title">Looking good!</strong><small id="reminder-copy">Your collection activity will show here.</small></span></div></section>
+        </div>
+        <section class="panel map-preview-panel"><div class="panel-heading"><div><p class="eyebrow">KNOW YOUR NEIGHBORHOOD</p><h2>Community map</h2></div><a class="text-link" href="map.html">Open map <span>→</span></a></div><div class="map-preview-layout"><div class="mini-map" id="mini-map"></div><div class="map-preview-info"><div class="map-pin-heading"><span class="map-pin-icon">⌖</span><div><strong>Every home, in one place</strong><small>Quickly see who’s paid and where they live.</small></div></div><div class="map-legend"><span><i class="legend-dot paid-dot"></i>Paid</span><span><i class="legend-dot due-dot"></i>Due soon</span><span><i class="legend-dot late-dot"></i>Overdue</span></div><a class="button button-secondary map-open-button" href="map.html">Explore property map <span>→</span></a></div></div></section>
+      </section>
+    </div>
+    <script src="./auth.js"></script><script src="./app-shell.js"></script><script src="./app.js"></script>
+  </body>
+</html>

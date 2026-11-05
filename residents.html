@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#f6f7f5" /><title>Residents — Bistek Village</title><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" /><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" /><script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css" /></head>
+  <body class="bg-canvas font-sans text-ink antialiased" data-page="residents"><div id="app-shell"></div><div id="page-content" class="hidden">
+    <section>
+      <div class="page-heading"><div><p class="eyebrow">COMMUNITY DIRECTORY</p><h1>Residents</h1><p class="heading-subtitle">Manage the people and homes in your community.</p></div><div class="heading-actions"><button class="button button-primary" data-open-add><span>＋</span> Add resident</button></div></div>
+      <section class="panel directory-panel"><div class="panel-heading directory-heading"><div><p class="eyebrow">RESIDENT DIRECTORY</p><h2 id="resident-page-count">All residents</h2></div><label class="search-box"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><input id="resident-search" type="search" placeholder="Search residents..." /></label></div><div class="table-wrap"><table><thead><tr><th>RESIDENT</th><th>PROPERTY</th><th>CONTACT</th><th>MONTHLY DUES</th><th>PAYMENT</th><th></th></tr></thead><tbody id="residents-table"></tbody></table></div><div class="empty-state hidden" id="residents-empty">No residents match your search.</div></section>
+    </section>
+  </div><script src="./auth.js"></script><script src="./app-shell.js"></script><script src="./app.js"></script></body>
+</html>

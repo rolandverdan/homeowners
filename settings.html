@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#f6f7f5" /><title>Settings — Bistek Village</title><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" /><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" /><script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="./styles.css" /></head>
+  <body class="bg-canvas font-sans text-ink antialiased" data-page="settings"><div id="app-shell"></div><div id="page-content" class="hidden">
+    <section>
+      <div class="page-heading"><div><p class="eyebrow">WORKSPACE PREFERENCES</p><h1>Settings</h1><p class="heading-subtitle">Keep your community information up to date.</p></div></div>
+      <section class="panel settings-panel"><div class="panel-heading"><div><p class="eyebrow">COMMUNITY DETAILS</p><h2>Basic information</h2></div></div><form id="settings-form" class="settings-form"><label>Village name<input name="communityName" value="Bistek Village" required /></label><label>Default monthly village dues (₱)<input name="defaultMonthlyDues" type="number" min="0" step="50" value="500" required /></label><label>Village dues due day of the month<input name="dueDay" type="number" min="1" max="28" value="5" required /></label><div class="settings-actions"><span id="settings-saved" role="status"></span><button class="button button-primary" type="submit">Save changes</button></div></form></section>
+      <section class="panel settings-note"><span class="reminder-icon">✳</span><div><strong>Your data stays in this browser</strong><p>The demo uses a placeholder of ₱500 in monthly village dues per resident. Update it to Bistek Village's actual amount. Data is saved only in local storage on this device; connect a secure backend before entering real resident information.</p></div></section>
+    </section>
+  </div><script src="./auth.js"></script><script src="./app-shell.js"></script><script src="./app.js"></script></body>
+</html>

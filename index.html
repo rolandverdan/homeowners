@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f7f1" />
+    <meta name="description" content="Welcome to Bistek Village. A community-first neighborhood with a simpler way to stay connected and keep village dues organized." />
+    <title>Bistek Village — A community to call home</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="village-home">
+    <header class="village-header">
+      <a class="village-brand" href="index.html" aria-label="Bistek Village home">
+        <span class="village-brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M5 15.1 16 6l11 9.1v11.2a1.7 1.7 0 0 1-1.7 1.7h-5.8v-8.5h-7v8.5H6.7A1.7 1.7 0 0 1 5 26.3V15.1Z" fill="currentColor"/><path d="m3.7 14.8 11.2-9.4a1.8 1.8 0 0 1 2.2 0l11.2 9.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+        <span><strong>Bistek Village</strong><small>COMMUNITY · QUEZON CITY</small></span>
+      </a>
+      <nav class="village-nav" aria-label="Main navigation">
+        <a href="#welcome">Welcome</a><a href="#community">Our community</a><a href="#dues">Village dues</a>
+      </nav>
+      <a class="village-admin-link" href="login.html">Admin sign in <span>↗</span></a>
+    </header>
+
+    <main>
+      <section class="village-hero" id="welcome">
+        <div class="village-hero-copy">
+          <span class="village-eyebrow"><i></i> A NEIGHBORHOOD IN QUEZON CITY</span>
+          <h1>Rooted in community.<br /><span>Made for living.</span></h1>
+          <p>Welcome to Bistek Village—a neighborhood where home is more than an address. It’s the people, the shared spaces, and the community we build together.</p>
+          <div class="village-hero-actions"><a class="village-primary-button" href="#community">Discover our village <span>↓</span></a><a class="village-text-button" href="login.html">Village admin <span>↗</span></a></div>
+          <div class="village-hero-foot"><span class="community-mark">✳</span><span><strong>A community that works together</strong><small>Neighbors first. A village to call home.</small></span></div>
+        </div>
+        <div class="village-hero-visual" aria-label="Illustration of homes in a leafy neighborhood">
+          <div class="hero-visual-top"><span><i></i> BISTEK VILLAGE</span><span>QUEZON CITY · PH</span></div>
+          <div class="village-landscape">
+            <div class="landscape-sun"></div><div class="landscape-cloud cloud-one"></div><div class="landscape-cloud cloud-two"></div>
+            <div class="landscape-hill hill-back"></div><div class="landscape-hill hill-front"></div>
+            <div class="village-house house-left"><div class="house-roof"></div><div class="house-body"><span class="house-window window-left"></span><span class="house-door"></span><span class="house-window window-right"></span></div></div>
+            <div class="village-house house-center"><div class="house-roof"></div><div class="house-body"><span class="house-window window-left"></span><span class="house-door"></span><span class="house-window window-right"></span></div></div>
+            <div class="village-house house-right"><div class="house-roof"></div><div class="house-body"><span class="house-window window-left"></span><span class="house-door"></span><span class="house-window window-right"></span></div></div>
+            <div class="landscape-tree tree-left"><i></i><b></b></div><div class="landscape-tree tree-right"><i></i><b></b></div>
+            <div class="landscape-path"></div>
+          </div>
+          <div class="hero-visual-caption"><span><strong>More than a place.</strong><small>A community growing together.</small></span><span class="caption-spark">✳</span></div>
+        </div>
+        <span class="hero-deco hero-deco-one">✳</span><span class="hero-deco hero-deco-two">✳</span>
+      </section>
+
+      <section class="village-intro" id="community">
+        <div class="intro-heading"><span class="village-eyebrow"><i></i> THE VILLAGE WAY</span><h2>A good place to call<br />your own.</h2></div>
+        <div class="intro-copy"><p>Bistek Village is shaped by the people who call it home. Neighbors, families, and a shared sense of belonging make this more than a collection of homes—it makes it a community.</p><a href="#dues">See how we care for our community <span>→</span></a></div>
+      </section>
+
+      <section class="village-values" aria-label="What makes a community">
+        <article class="village-value-card"><span class="value-icon value-icon-green">⌂</span><p class="eyebrow">A PLACE TO BELONG</p><h3>Built around neighbors</h3><p>A welcoming village starts with the connections we make and the care we show each other.</p></article>
+        <article class="village-value-card"><span class="value-icon value-icon-yellow">✳</span><p class="eyebrow">SHARED RESPONSIBILITY</p><h3>Better, together</h3><p>When residents and administrators work together, the whole community benefits.</p></article>
+        <article class="village-value-card"><span class="value-icon value-icon-blue">↗</span><p class="eyebrow">A VILLAGE THAT GROWS</p><h3>Care for what’s next</h3><p>Simple, thoughtful community management helps keep everyone moving forward.</p></article>
+      </section>
+
+      <section class="village-dues" id="dues">
+        <div class="dues-copy"><span class="village-eyebrow"><i></i> COMMUNITY CARE</span><h2>Small contributions.<br /><span>Shared progress.</span></h2><p>Monthly village dues help support the needs of the community. The village admin keeps dues organized and records whether each household has paid.</p><a class="village-primary-button" href="login.html">Administrator access <span>↗</span></a></div>
+        <div class="dues-illustration" aria-hidden="true"><div class="dues-orbit orbit-one"></div><div class="dues-orbit orbit-two"></div><span class="dues-star star-one">✳</span><span class="dues-star star-two">✳</span><div class="dues-house-icon">⌂</div><div class="dues-bubble bubble-one">Community</div><div class="dues-bubble bubble-two">Together</div></div>
+      </section>
+
+      <section class="village-contact">
+        <div><span class="village-eyebrow"><i></i> SAY HELLO</span><h2>We’re glad you’re here.</h2><p>For village questions, reach out to your community administrator.</p></div>
+        <a class="village-primary-button" href="login.html">Administrator sign in <span>↗</span></a>
+      </section>
+    </main>
+    <footer class="village-footer"><a class="village-brand" href="#welcome"><span class="village-brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M5 15.1 16 6l11 9.1v11.2a1.7 1.7 0 0 1-1.7 1.7h-5.8v-8.5h-7v8.5H6.7A1.7 1.7 0 0 1 5 26.3V15.1Z" fill="currentColor"/></svg></span><span><strong>Bistek Village</strong><small>COMMUNITY · QUEZON CITY</small></span></a><span>Made for community, with community.</span><a href="login.html">Administrator sign in ↗</a></footer>
+    <script>
+      const navLinks = document.querySelectorAll(".village-nav a");
+      navLinks.forEach((link) => link.addEventListener("click", () => {
+        navLinks.forEach((item) => item.classList.remove("active"));
+        link.classList.add("active");
+      }));
+    </script>
+  </body>
+</html>

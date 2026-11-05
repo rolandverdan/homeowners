@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f5" />
+    <title>Admin sign in — Bistek Village</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-layout">
+      <section class="login-brand-panel">
+        <a class="brand login-brand" href="login.html" aria-label="Haven sign in">
+          <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M5 15.1 16 6l11 9.1v11.2a1.7 1.7 0 0 1-1.7 1.7h-5.8v-8.5h-7v8.5H6.7A1.7 1.7 0 0 1 5 26.3V15.1Z" fill="currentColor"/><path d="m3.7 14.8 11.2-9.4a1.8 1.8 0 0 1 2.2 0l11.2 9.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+          <span class="brand-name">haven<span>.</span><small>BISTEK VILLAGE ADMIN</small></span>
+        </a>
+        <div class="login-promo">
+          <span class="login-promo-tag"><i></i> BISTEK VILLAGE COMMUNITY ADMIN</span>
+          <h1>A better way to<br />care for your<br /><span>community.</span></h1>
+          <p>Keep track of residents, monthly village dues, and every home in your neighborhood—all in one place.</p>
+          <div class="login-promo-art" aria-hidden="true"><span class="promo-sun"></span><span class="promo-path"></span><span class="promo-house house-one">⌂</span><span class="promo-house house-two">⌂</span><span class="promo-house house-three">⌂</span><span class="promo-tree tree-one">✳</span><span class="promo-tree tree-two">✳</span></div>
+        </div>
+        <small class="login-copyright">© <span id="copyright-year"></span> Bistek Village Admin</small>
+      </section>
+      <section class="login-form-panel">
+        <div class="login-form-wrap">
+          <p class="eyebrow">ADMINISTRATOR ACCESS</p>
+          <h2>Welcome back</h2>
+          <p class="login-subtitle">Sign in to manage your community workspace.</p>
+          <form id="login-form" class="login-form">
+            <label for="login-email">Email address</label>
+            <div class="login-input-wrap"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><input id="login-email" name="email" type="email" autocomplete="username" placeholder="admin@haven.local" required /></div>
+            <div class="password-label-row"><label for="login-password">Password</label><span>Admin account only</span></div>
+            <div class="login-input-wrap"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required /><button class="password-toggle" id="password-toggle" type="button" aria-label="Show password"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+            <p class="login-error hidden" id="login-error" role="alert"></p>
+            <button class="button button-primary login-submit" type="submit">Sign in <span>→</span></button>
+          </form>
+          <div class="demo-credentials"><span class="demo-credential-icon">i</span><p><strong>Demo account</strong><br />Email: <code>admin@haven.local</code><br />Password: <code>HavenAdmin2026</code></p></div>
+          <p class="no-signup-note">This workspace is for administrators only. New account registration is disabled.</p>
+          <p class="security-note"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Demo sign-in only. Production authentication requires a secure backend.</p>
+        </div>
+      </section>
+    </main>
+    <script>document.body.dataset.page = "login"; document.getElementById("copyright-year").textContent = new Date().getFullYear();</script>
+    <script src="./login.js"></script>
+  </body>
+</html>
