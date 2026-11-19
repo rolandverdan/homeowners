@@ -1,3 +1,5 @@
+import { loadCommunity, saveCommunity } from "./firebase.js";
+
 const STORAGE_KEY = "haven-community-admin-v1";
 const DATA_VERSION = 2;
 
@@ -73,8 +75,11 @@ function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, dataVersion: DATA_VERSION }));
   } catch (error) {
     console.error("Could not save community data.", error);
-    showToast("Could not save changes in this browser.");
   }
+  saveCommunity({ ...state, dataVersion: DATA_VERSION }).catch((error) => {
+    console.error("Could not save community data to Firestore.", error);
+    showToast("Firestore save failed. Check Firebase setup and Firestore rules.");
+  });
 }
 
 function escapeHTML(value) {
@@ -407,9 +412,26 @@ if (settingsForm) {
 }
 const mapResident = new URLSearchParams(window.location.search).get("resident");
 if (mapResident) selectedResidentId = mapResident;
-render();
-if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
-if (dataNeedsSaving) {
-  saveState();
-  dataNeedsSaving = false;
+async function startApp() {
+  try {
+    const cloudState = await loadCommunity();
+    if (cloudState && Array.isArray(cloudState.residents) && cloudState.settings) {
+      state = { residents: cloudState.residents, settings: { ...defaultSettings, ...cloudState.settings } };
+    } else {
+      state = loadState();
+      await saveCommunity({ ...state, dataVersion: DATA_VERSION });
+    }
+    render();
+    if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
+    if (dataNeedsSaving) {
+      saveState();
+      dataNeedsSaving = false;
+    }
+  } catch (error) {
+    console.error("Could not connect to Firestore.", error);
+    showToast(error.message || "Could not connect to Firestore.");
+    render();
+    if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
+  }
 }
+startApp();

@@ -39,13 +39,12 @@
             <p class="login-error hidden" id="login-error" role="alert"></p>
             <button class="button button-primary login-submit" type="submit">Sign in <span>→</span></button>
           </form>
-          <div class="demo-credentials"><span class="demo-credential-icon">i</span><p><strong>Demo account</strong><br />Email: <code>admin@haven.local</code><br />Password: <code>HavenAdmin2026</code></p></div>
           <p class="no-signup-note">This workspace is for administrators only. New account registration is disabled.</p>
-          <p class="security-note"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Demo sign-in only. Production authentication requires a secure backend.</p>
+          <p class="security-note"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> Sign-in uses Firebase Authentication.</p>
         </div>
       </section>
     </main>
     <script>document.body.dataset.page = "login"; document.getElementById("copyright-year").textContent = new Date().getFullYear();</script>
-    <script src="./login.js"></script>
+    <script type="module" src="./login.js"></script>
   </body>
 </html>

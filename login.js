@@ -1,10 +1,7 @@
-const DEMO_EMAIL = "admin@haven.local";
-const DEMO_PASSWORD = "HavenAdmin2026";
-const AUTH_KEY = "haven-admin-session";
+import { auth } from "./firebase.js";
+import { signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js";
 
-if (sessionStorage.getItem(AUTH_KEY) === "authenticated") {
-  window.location.replace("dashboard.html");
-}
+if (auth) onAuthStateChanged(auth, (user) => { if (user) window.location.replace("dashboard.html"); });
 
 document.getElementById("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -13,15 +10,18 @@ document.getElementById("login-form").addEventListener("submit", (event) => {
   const password = String(new FormData(form).get("password"));
   const error = document.getElementById("login-error");
 
-  if (email !== DEMO_EMAIL || password !== DEMO_PASSWORD) {
-    error.textContent = "The email or password is incorrect.";
+  if (!auth) {
+    error.textContent = "Add your Firebase web app settings before signing in.";
     error.classList.remove("hidden");
-    form.elements.password.focus();
     return;
   }
-
-  sessionStorage.setItem(AUTH_KEY, "authenticated");
-  window.location.replace("dashboard.html");
+  signInWithEmailAndPassword(auth, email, password)
+    .then(() => window.location.replace("dashboard.html"))
+    .catch(() => {
+      error.textContent = "Sign-in failed. Check your email and password.";
+      error.classList.remove("hidden");
+      form.elements.password.focus();
+    });
 });
 
 document.getElementById("password-toggle").addEventListener("click", () => {
