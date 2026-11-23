@@ -1,33 +1,26 @@
-import { loadCommunity, saveCommunity } from "./firebase.js";
+import { auth, authReady, loadCommunity, saveCommunity } from "./firebase.js";
 
 const STORAGE_KEY = "haven-community-admin-v1";
 const DATA_VERSION = 2;
 
-const initialResidents = [
-  { id: "resident-1", name: "Sofia Reyes", phone: "0917 234 8810", email: "sofia.reyes@email.com", lot: "A-01", street: "Acacia Lane", monthlyDues: 500, paid: true, paidAt: "Nov 02" },
-  { id: "resident-2", name: "Marcus Dela Cruz", phone: "0918 552 1903", email: "marcus.dc@email.com", lot: "A-02", street: "Acacia Lane", monthlyDues: 500, paid: true, paidAt: "Nov 03" },
-  { id: "resident-3", name: "Isabella Santos", phone: "0920 341 7726", email: "isabella.s@email.com", lot: "A-03", street: "Acacia Lane", monthlyDues: 500, paid: false },
-  { id: "resident-4", name: "Noah Garcia", phone: "0917 809 4412", email: "noah.garcia@email.com", lot: "A-04", street: "Acacia Lane", monthlyDues: 500, paid: true, paidAt: "Nov 01" },
-  { id: "resident-5", name: "Amara Villanueva", phone: "0998 112 0634", email: "amara.v@email.com", lot: "B-01", street: "Mango Street", monthlyDues: 500, paid: false },
-  { id: "resident-6", name: "Ethan Lim", phone: "0916 875 3201", email: "ethan.lim@email.com", lot: "B-02", street: "Mango Street", monthlyDues: 500, paid: true, paidAt: "Nov 04" },
-  { id: "resident-7", name: "Chloe Mendoza", phone: "0927 405 6912", email: "chloe.m@email.com", lot: "B-03", street: "Mango Street", monthlyDues: 500, paid: false },
-  { id: "resident-8", name: "Liam Bautista", phone: "0917 661 0285", email: "liam.b@email.com", lot: "B-04", street: "Mango Street", monthlyDues: 500, paid: true, paidAt: "Nov 02" },
-  { id: "resident-9", name: "Mia Fernandez", phone: "0922 173 8806", email: "mia.f@email.com", lot: "C-01", street: "Pine Avenue", monthlyDues: 500, paid: false },
-  { id: "resident-10", name: "Lucas Navarro", phone: "0915 908 2751", email: "lucas.n@email.com", lot: "C-02", street: "Pine Avenue", monthlyDues: 500, paid: true, paidAt: "Nov 05" },
-  { id: "resident-11", name: "Zara Castillo", phone: "0995 347 6219", email: "zara.c@email.com", lot: "C-03", street: "Pine Avenue", monthlyDues: 500, paid: false },
-  { id: "resident-12", name: "Caleb Torres", phone: "0918 720 5146", email: "caleb.t@email.com", lot: "C-04", street: "Pine Avenue", monthlyDues: 500, paid: false }
-];
-
-const defaultSettings = { communityName: "Bistek Village", defaultMonthlyDues: 500, dueDay: 5 };
+const defaultSettings = { communityName: "Bistek Village", defaultMonthlyDues: 0, dueDay: 5 };
+const mapDefaultCenter = [14.732702501957057, 121.04251314283857];
 const today = new Date();
 const currentMonth = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(today);
 const currentMonthShort = new Intl.DateTimeFormat("en", { month: "short" }).format(today);
 const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-const dateLabel = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric" }).format(today);
+const TABLE_PAGE_SIZE = 10;
+const tablePages = { overview: 1, residents: 1, payments: 1 };
 let dataNeedsSaving = false;
 let toastTimer;
 let state = loadState();
 let selectedResidentId = null;
+let editingResidentId = null;
+let communityMap;
+let miniMap;
+let mapMarkers;
+let pickerMap;
+let pickerMarker;
 
 function loadState() {
   try {
@@ -59,13 +52,10 @@ function loadState() {
     }
   } catch (error) {
     console.error("Could not load saved community data.", error);
-    showToast("Saved data could not be loaded. Using the demo list instead.");
+    showToast("Saved data could not be loaded. Starting with an empty resident list.");
   }
   return {
-    residents: initialResidents.map((resident) => ({
-      ...resident,
-      paidMonth: resident.paid ? currentMonthKey : null
-    })),
+    residents: [],
     settings: { ...defaultSettings }
   };
 }
@@ -96,8 +86,45 @@ function initials(name) {
   return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
 }
 
+function philippinesMobileDigits(value) {
+  let digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.startsWith("63")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  return digits.slice(-10);
+}
+
+function formatPhilippinesPhone(value) {
+  const digits = philippinesMobileDigits(value);
+  return /^9\d{9}$/.test(digits) ? `+63${digits}` : String(value ?? "");
+}
+
+function actionIcon(name) {
+  const icons = {
+    view: '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/>',
+    edit: '<path d="m4 16.5-.8 4.3 4.3-.8L19.8 7.7a2.1 2.1 0 0 0-3-3L4 16.5Z"/><path d="m15.5 6 3 3"/>',
+    delete: '<path d="M4 7h16M10 11v6m4-6v6M5.5 7l1 13h11l1-13M9 7V4h6v3"/>',
+    paid: '<path d="M20 11.1V12a8 8 0 1 1-4.7-7.3"/><path d="m8.5 11.5 3 3L21 5"/>',
+    undo: '<path d="M3 7v5h5M4.2 11A8 8 0 1 1 5 16"/>'
+  };
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.view}</svg>`;
+}
+
+function rowAction(label, icon, attributes, tag = "button", href = "#") {
+  const common = `class="row-action icon-action" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}"`;
+  return tag === "a"
+    ? `<a ${common} href="${href}">${actionIcon(icon)}</a>`
+    : `<button type="button" ${common} ${attributes || ""}>${actionIcon(icon)}</button>`;
+}
+
 function isPaid(resident) {
   return resident.paidMonth === currentMonthKey;
+}
+
+function paymentDateLabel(resident) {
+  if (resident.paidDate && /^\d{4}-\d{2}-\d{2}$/.test(resident.paidDate)) {
+    return new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(new Date(`${resident.paidDate}T00:00:00`));
+  }
+  return resident.paidAt || "Paid";
 }
 
 function paymentStatus(resident) {
@@ -114,7 +141,7 @@ function statusMarkup(resident) {
 }
 
 function residentCell(resident) {
-  return `<div class="resident-cell"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><span><strong class="resident-name">${escapeHTML(resident.name)}</strong><small class="resident-email">${escapeHTML(resident.email || resident.phone)}</small></span></div>`;
+  return `<div class="resident-cell"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><span><strong class="resident-name">${escapeHTML(resident.name)}</strong><small class="resident-email">${escapeHTML(resident.email || formatPhilippinesPhone(resident.phone))}</small></span></div>`;
 }
 
 function render() {
@@ -135,7 +162,6 @@ function render() {
     const element = document.getElementById(id);
     if (element) element.style.width = `${value}%`;
   };
-  setText("today-label", dateLabel);
   setText("resident-count", state.residents.length);
   document.querySelectorAll("[data-community-name]").forEach((element) => { element.textContent = state.settings.communityName; });
 
@@ -156,11 +182,7 @@ function render() {
     setText("legend-due", pendingResidents.length);
     setText("reminder-title", pendingResidents.length ? `${pendingResidents.length} payment${pendingResidents.length === 1 ? "" : "s"} to follow up` : "Looking good!");
     setText("reminder-copy", overdueCount ? `${overdueCount} overdue · ${dueCount} due soon. Check the dues register.` : pendingResidents.length ? "A quick reminder can help keep collections on track." : "All residents are up to date this month.");
-    const overviewTable = document.getElementById("overview-table");
-    if (overviewTable) {
-      overviewTable.innerHTML = state.residents.slice(0, 5).map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td>${isPaid(resident) ? `<span class="row-action">${escapeHTML(resident.paidAt || "Paid")}</span>` : `<button class="row-action mark-paid" data-mark-paid="${escapeHTML(resident.id)}">Mark paid</button>`}</td></tr>`).join("");
-      document.getElementById("overview-empty").classList.toggle("hidden", state.residents.length > 0);
-    }
+    renderOverviewTable();
   }
 
   setText("payments-collected", formatCurrency(paidTotal));
@@ -191,9 +213,8 @@ function render() {
   if (paymentSearch) renderPaymentsTable(paymentSearch.value);
   const pageCount = document.getElementById("resident-page-count");
   if (pageCount) pageCount.textContent = `All residents · ${state.residents.length}`;
-  const paymentsPageCount = document.getElementById("payments-page-count");
-  if (paymentsPageCount) paymentsPageCount.textContent = `All payments · ${state.residents.length}`;
-  setText("map-home-count", `${state.residents.length} homes`);
+  const mappedHomes = state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).length;
+  setText("map-home-count", `${mappedHomes} mapped home${mappedHomes === 1 ? "" : "s"}`);
   if (document.getElementById("mini-map") || document.getElementById("full-map")) renderMaps();
   if (document.getElementById("selected-home")) renderSelectedHome();
 }
@@ -203,62 +224,108 @@ function renderResidentsTable(query = "") {
   if (!table) return;
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = state.residents.filter((resident) => [resident.name, resident.email, resident.phone, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
-  table.innerHTML = filtered.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)}<br><span class="resident-email">${escapeHTML(resident.street)}</span></td><td>${escapeHTML(resident.phone)}<br><span class="resident-email">${escapeHTML(resident.email || "No email")}</span></td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td><a class="row-action" href="map.html?resident=${encodeURIComponent(resident.id)}">View home</a></td></tr>`).join("");
+  const pageItems = getTablePage(filtered, "residents");
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)}<br><span class="resident-email">${escapeHTML(resident.street)}</span></td><td>${escapeHTML(formatPhilippinesPhone(resident.phone))}<br><span class="resident-email">${escapeHTML(resident.email || "No email")}</span></td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td class="table-actions">${rowAction("View", "view", `data-view-resident="${escapeHTML(resident.id)}"`)}${rowAction("Edit", "edit", `data-edit-resident="${escapeHTML(resident.id)}"`)}${rowAction("Delete", "delete", `data-delete-resident="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
   document.getElementById("residents-empty").classList.toggle("hidden", filtered.length > 0);
+  renderTablePagination("residents-pagination", filtered.length, "residents");
 }
 
 function renderPaymentsTable(query = "") {
   const table = document.getElementById("payments-table");
   if (!table) return;
   const normalizedQuery = query.trim().toLowerCase();
-  const filtered = state.residents.filter((resident) => [resident.name, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
-  table.innerHTML = filtered.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${escapeHTML(currentMonthShort)} ${Number(state.settings.dueDay)}, ${today.getFullYear()}</td><td>${statusMarkup(resident)}</td><td>${isPaid(resident) ? `<button class="row-action" data-mark-unpaid="${escapeHTML(resident.id)}">Undo</button>` : `<button class="row-action mark-paid" data-mark-paid="${escapeHTML(resident.id)}">Mark paid</button>`}</td></tr>`).join("");
+  const statusFilter = document.getElementById("payment-status-filter")?.value || "all";
+  const filtered = state.residents.filter((resident) => {
+    const matchesQuery = [resident.name, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery));
+    return matchesQuery && (statusFilter === "all" || paymentStatus(resident) === statusFilter);
+  });
+  const pageItems = getTablePage(filtered, "payments");
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${escapeHTML(currentMonthShort)} ${Number(state.settings.dueDay)}, ${today.getFullYear()}</td><td>${statusMarkup(resident)}</td><td class="payment-actions">${rowAction("View resident", "view", `data-view-resident="${escapeHTML(resident.id)}"`)}${rowAction("Edit resident", "edit", `data-edit-resident="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
   document.getElementById("payments-empty").classList.toggle("hidden", filtered.length > 0);
+  const statusLabels = { all: "All payments", paid: "Paid payments", due: "Due soon", overdue: "Overdue" };
+  const heading = document.getElementById("payments-page-count");
+  if (heading) heading.textContent = `${statusLabels[statusFilter]} · ${filtered.length}`;
+  renderTablePagination("payments-pagination", filtered.length, "payments");
 }
 
-function lotMarkup(resident, compact = false) {
-  const status = resident ? paymentStatus(resident) : "vacant";
-  const name = resident ? resident.name.split(" ")[0] : "Vacant";
-  if (compact) {
-    const contents = `<span>${escapeHTML(resident ? resident.lot : "—")}</span>`;
-    return resident
-      ? `<a class="lot-pin ${status === "overdue" ? "overdue" : status}" href="map.html?resident=${encodeURIComponent(resident.id)}" aria-label="${escapeHTML(resident.lot)}, ${escapeHTML(resident.name)}, ${status}">${contents}</a>`
-      : `<span class="lot-pin vacant" aria-label="Vacant lot">${contents}</span>`;
-  }
-  return `<button type="button" class="map-lot ${status}" data-select-resident="${resident ? escapeHTML(resident.id) : ""}" ${resident ? "" : "disabled"} aria-label="${resident ? `${escapeHTML(resident.lot)}, ${escapeHTML(resident.name)}, ${status}` : "Vacant lot"}"><span class="map-lot-mark">⌂</span><span class="map-lot-code">${escapeHTML(resident ? resident.lot : "—")}</span><span class="map-lot-name">${escapeHTML(name)}</span></button>`;
+function renderOverviewTable() {
+  const table = document.getElementById("overview-table");
+  if (!table) return;
+  const pageItems = getTablePage(state.residents, "overview");
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td>${isPaid(resident) ? `<span class="payment-date-action">Paid · ${escapeHTML(paymentDateLabel(resident))}</span>` : rowAction("Mark paid", "paid", `data-mark-paid="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
+  document.getElementById("overview-empty")?.classList.toggle("hidden", state.residents.length > 0);
+  renderTablePagination("overview-pagination", state.residents.length, "overview");
+}
+
+function getTablePage(items, key) {
+  const totalPages = Math.max(1, Math.ceil(items.length / TABLE_PAGE_SIZE));
+  tablePages[key] = Math.min(Math.max(1, tablePages[key] || 1), totalPages);
+  const start = (tablePages[key] - 1) * TABLE_PAGE_SIZE;
+  return items.slice(start, start + TABLE_PAGE_SIZE);
+}
+
+function renderTablePagination(elementId, itemCount, key) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
+  const totalPages = Math.max(1, Math.ceil(itemCount / TABLE_PAGE_SIZE));
+  const page = Math.min(Math.max(1, tablePages[key] || 1), totalPages);
+  tablePages[key] = page;
+  const firstItem = itemCount ? (page - 1) * TABLE_PAGE_SIZE + 1 : 0;
+  const lastItem = Math.min(page * TABLE_PAGE_SIZE, itemCount);
+  container.innerHTML = `<span class="pagination-summary">Showing ${firstItem}–${lastItem} of ${itemCount}</span><div class="pagination-controls"><button type="button" data-table-page="${key}" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>Previous</button><span>Page ${page} of ${totalPages}</span><button type="button" data-table-page="${key}" data-page="${page + 1}" ${page >= totalPages ? "disabled" : ""}>Next</button></div>`;
 }
 
 function renderMaps() {
   const mini = document.getElementById("mini-map");
   const full = document.getElementById("full-map");
   if (!mini && !full) return;
-  const standardLayout = ["A-01", "A-02", "A-03", "A-04", "B-01", "B-02", "B-03", "B-04", "C-01", "C-02", "C-03", "C-04"];
-  const additionalLots = state.residents.map((resident) => resident.lot.toUpperCase()).filter((lot) => !standardLayout.includes(lot)).sort();
-  const layout = [...standardLayout, ...additionalLots];
-  const byLot = new Map(state.residents.map((resident) => [resident.lot.toUpperCase(), resident]));
-  const rowCount = Math.ceil(layout.length / 6);
-  if (mini) {
-    mini.style.gridTemplateRows = `repeat(${Math.max(3, rowCount)}, minmax(28px, 1fr))`;
-    mini.style.minHeight = `${Math.max(138, Math.max(3, rowCount) * 38 + 32)}px`;
-    mini.innerHTML = layout.map((lot) => lotMarkup(byLot.get(lot), true)).join("");
+  const setupMap = (element, zoom, interactive) => {
+    if (!element || !window.L) return null;
+    if (element._leaflet_id) return element === full ? communityMap : miniMap;
+    const map = L.map(element, { zoomControl: interactive, dragging: interactive, scrollWheelZoom: interactive, doubleClickZoom: interactive, boxZoom: interactive, keyboard: interactive, tap: interactive }).setView(mapDefaultCenter, zoom);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    return map;
+  };
+  if (full && !communityMap) {
+    communityMap = setupMap(full, 16, true);
+    if (communityMap) mapMarkers = L.layerGroup().addTo(communityMap);
   }
-  if (full) {
-    full.style.gridTemplateRows = `repeat(${Math.max(4, rowCount)}, 76px)`;
-    full.style.minHeight = `${Math.max(420, Math.max(4, rowCount) * 87 + 50)}px`;
-    full.innerHTML = `<span class="street-label street-horizontal">MANGO STREET</span><span class="street-label street-vertical">ACACIA LANE</span>${layout.map((lot) => lotMarkup(byLot.get(lot))).join("")}`;
+  if (mini && !miniMap) miniMap = setupMap(mini, 15, false);
+  if (!mapMarkers && communityMap) mapMarkers = L.layerGroup().addTo(communityMap);
+  const makeResidentMarker = (resident) => {
+    const status = paymentStatus(resident);
+    const icon = L.divIcon({ className: "resident-marker-icon", html: `<span class="resident-map-pin ${status}"></span>`, iconSize: [22, 28], iconAnchor: [11, 26] });
+    return L.marker([Number(resident.latitude), Number(resident.longitude)], { icon });
+  };
+  if (mapMarkers) {
+    mapMarkers.clearLayers();
+    state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).forEach((resident) => {
+      const marker = makeResidentMarker(resident);
+      marker.on("click", () => selectResident(resident.id));
+      marker.addTo(mapMarkers);
+    });
   }
+  if (miniMap) {
+    miniMap.eachLayer((layer) => { if (layer instanceof L.Marker) miniMap.removeLayer(layer); });
+    state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).forEach((resident) => makeResidentMarker(resident).addTo(miniMap));
+  }
+  const located = state.residents.find((resident) => resident.id === selectedResidentId && Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude)));
+  if (located && communityMap) communityMap.setView([Number(located.latitude), Number(located.longitude)], 18);
+  requestAnimationFrame(() => { communityMap?.invalidateSize(); miniMap?.invalidateSize(); });
 }
 
 function renderSelectedHome() {
   const panel = document.getElementById("selected-home");
   if (!panel) return;
   const resident = state.residents.find((item) => item.id === selectedResidentId);
-  document.querySelectorAll(".map-lot").forEach((lot) => lot.classList.toggle("selected", Boolean(resident && lot.dataset.selectResident === resident.id)));
   if (!resident) {
     panel.innerHTML = `<div class="selected-empty"><span class="selected-house">⌂</span><h3>Select a home</h3><p>Choose a lot on the map to see resident and payment details.</p></div>`;
     return;
   }
-  panel.innerHTML = `<div class="selected-resident-head"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><span><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</small></span></div><div class="selected-detail"><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div class="selected-detail"><span>Phone</span><strong>${escapeHTML(resident.phone)}</strong></div><div class="selected-detail"><span>This month</span><strong>${statusMarkup(resident)}</strong></div><div class="selected-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Undo payment</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark dues as paid</button>`}<a class="button button-secondary" href="residents.html">View resident directory</a></div>`;
+  panel.innerHTML = `<div class="selected-resident-head"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><span><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</small></span></div><div class="selected-detail"><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div class="selected-detail"><span>Phone</span><strong>${escapeHTML(formatPhilippinesPhone(resident.phone))}</strong></div><div class="selected-detail"><span>Email</span><strong>${escapeHTML(resident.email || "Not provided")}</strong></div><div class="selected-detail"><span>This month</span><strong>${statusMarkup(resident)}</strong></div>${isPaid(resident) ? `<div class="selected-detail"><span>Paid on</span><strong>${escapeHTML(paymentDateLabel(resident))}</strong></div>` : ""}<div class="selected-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Undo payment</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark dues as paid</button>`}<button class="button button-secondary" data-edit-resident="${escapeHTML(resident.id)}">Edit resident</button><a class="button button-secondary" href="residents.html">View resident directory</a></div>`;
 }
 
 function selectResident(id) {
@@ -267,9 +334,30 @@ function selectResident(id) {
   renderSelectedHome();
   const resident = state.residents.find((item) => item.id === id);
   if (resident) {
-    const selectedLot = document.querySelector(`.map-lot[data-select-resident="${CSS.escape(id)}"]`);
-    if (selectedLot) selectedLot.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (resident.latitude != null && resident.longitude != null) communityMap?.setView([Number(resident.latitude), Number(resident.longitude)], 18, { animate: true });
   }
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    requestAnimationFrame(() => scrollToResidentDetails());
+  }
+}
+
+function scrollToResidentDetails() {
+  const panel = document.getElementById("selected-home");
+  if (!panel) return;
+  const startY = window.scrollY;
+  const targetY = Math.max(0, startY + panel.getBoundingClientRect().top - 68);
+  const distance = targetY - startY;
+  const duration = 650;
+  const startedAt = performance.now();
+  const animate = (now) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = progress < 0.5
+      ? 4 * progress * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+    window.scrollTo(0, startY + distance * eased);
+    if (progress < 1) requestAnimationFrame(animate);
+  };
+  requestAnimationFrame(animate);
 }
 
 function markPaid(id) {
@@ -277,9 +365,13 @@ function markPaid(id) {
   if (!resident) return;
   resident.paidMonth = currentMonthKey;
   delete resident.paid;
-  resident.paidAt = `${currentMonthShort} ${String(today.getDate()).padStart(2, "0")}`;
+  delete resident.paidProofKey;
+  delete resident.paidProofName;
+  resident.paidDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  resident.paidAt = paymentDateLabel(resident);
   saveState();
   render();
+  if (!document.getElementById("resident-details-modal")?.classList.contains("hidden")) renderResidentDetails(id);
   showToast(`${resident.name}'s monthly dues marked as paid.`);
 }
 
@@ -289,9 +381,29 @@ function markUnpaid(id) {
   delete resident.paidMonth;
   delete resident.paid;
   delete resident.paidAt;
+  delete resident.paidDate;
+  delete resident.paidProofKey;
+  delete resident.paidProofName;
   saveState();
   render();
+  if (!document.getElementById("resident-details-modal")?.classList.contains("hidden")) renderResidentDetails(id);
   showToast(`${resident.name}'s payment was marked unpaid.`);
+}
+
+function openResidentDetails(id) {
+  renderResidentDetails(id);
+  document.getElementById("resident-details-modal")?.classList.remove("hidden");
+}
+
+function renderResidentDetails(id) {
+  const resident = state.residents.find((item) => item.id === id);
+  if (!resident) return;
+  document.getElementById("resident-details-title").textContent = resident.name;
+  document.getElementById("resident-details-content").innerHTML = `<div class="resident-details-summary"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><div><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.email || formatPhilippinesPhone(resident.phone))}</small></div></div><div class="resident-details-grid"><div><span>Phone</span><strong>${escapeHTML(formatPhilippinesPhone(resident.phone))}</strong></div><div><span>Email</span><strong>${escapeHTML(resident.email || "Not provided")}</strong></div><div><span>Property</span><strong>${escapeHTML([resident.lot, resident.street].filter(Boolean).join(" · ") || "Not provided")}</strong></div><div><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div><span>Payment status</span><strong>${statusMarkup(resident)}</strong></div>${isPaid(resident) ? `<div><span>Paid on</span><strong>${escapeHTML(paymentDateLabel(resident))}</strong></div>` : ""}</div><div class="resident-details-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Restore to unpaid</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark as paid</button>`}<button class="button button-secondary" data-edit-resident="${escapeHTML(resident.id)}">Edit resident</button></div>`;
+}
+
+function closeResidentDetails() {
+  document.getElementById("resident-details-modal")?.classList.add("hidden");
 }
 
 function showToast(message) {
@@ -306,9 +418,76 @@ function showToast(message) {
 function openModal() {
   const form = document.getElementById("resident-form");
   if (!form) return;
+  editingResidentId = null;
+  form.reset();
+  form.elements.phone.dispatchEvent(new Event("input", { bubbles: true }));
+  setPickerLocation(null, null);
+  document.getElementById("modal-title").textContent = "Add a resident";
+  document.getElementById("resident-submit").textContent = "Add resident";
   form.querySelector('[name="monthlyDues"]').value = state.settings.defaultMonthlyDues;
   document.getElementById("resident-modal").classList.remove("hidden");
+  initializePickerMap();
   form.querySelector('input[name="name"]').focus();
+}
+
+function editResident(id) {
+  const resident = state.residents.find((item) => item.id === id);
+  const form = document.getElementById("resident-form");
+  if (!resident || !form) return;
+  editingResidentId = id;
+  for (const field of ["name", "phone", "email", "lot", "street", "monthlyDues"]) {
+    form.elements[field].value = field === "phone" ? philippinesMobileDigits(resident.phone) : resident[field] ?? "";
+  }
+  form.elements.phone.dispatchEvent(new Event("input", { bubbles: true }));
+  document.getElementById("modal-title").textContent = "Edit resident";
+  document.getElementById("resident-submit").textContent = "Save changes";
+  document.getElementById("resident-modal").classList.remove("hidden");
+  setPickerLocation(resident.latitude, resident.longitude);
+  initializePickerMap();
+  form.querySelector('input[name="name"]').focus();
+}
+
+function setPickerLocation(latitude, longitude) {
+  const form = document.getElementById("resident-form");
+  if (!form) return;
+  const latInput = form.elements.latitude;
+  const lngInput = form.elements.longitude;
+  const hasLocation = Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude)) && latitude !== null && longitude !== null && latitude !== "" && longitude !== "";
+  latInput.value = hasLocation ? Number(latitude) : "";
+  lngInput.value = hasLocation ? Number(longitude) : "";
+  const hint = document.getElementById("location-hint");
+  if (hint) hint.textContent = hasLocation ? `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)} · click to move pin` : "Click the map to place a pin.";
+  if (pickerMap && hasLocation) {
+    pickerMap.setView([Number(latitude), Number(longitude)], Math.max(pickerMap.getZoom(), 17));
+    if (pickerMarker) pickerMarker.setLatLng([Number(latitude), Number(longitude)]);
+    else pickerMarker = L.marker([Number(latitude), Number(longitude)]).addTo(pickerMap);
+  } else if (pickerMarker && !hasLocation) {
+    pickerMap.removeLayer(pickerMarker);
+    pickerMarker = null;
+  }
+}
+
+function initializePickerMap() {
+  const element = document.getElementById("location-picker");
+  if (!element || !window.L) return;
+  if (!pickerMap) {
+    pickerMap = L.map(element).setView(mapDefaultCenter, 17);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(pickerMap);
+    pickerMap.on("click", (event) => setPickerLocation(event.latlng.lat, event.latlng.lng));
+  }
+  window.setTimeout(() => pickerMap.invalidateSize(), 80);
+}
+
+function deleteResident(id) {
+  const resident = state.residents.find((item) => item.id === id);
+  if (!resident || !window.confirm(`Delete ${resident.name} from the resident directory?`)) return;
+  state.residents = state.residents.filter((item) => item.id !== id);
+  saveState();
+  render();
+  showToast(`${resident.name} was deleted.`);
 }
 
 function closeModal() {
@@ -318,7 +497,7 @@ function closeModal() {
 function exportCSV() {
   const rows = [
     ["Resident", "Phone", "Email", "Lot", "Street", "Monthly dues", "Month", "Status", "Paid date"],
-    ...state.residents.map((resident) => [resident.name, resident.phone, resident.email || "", resident.lot, resident.street, resident.monthlyDues, currentMonth, isPaid(resident) ? "Paid" : paymentStatus(resident) === "overdue" ? "Overdue" : "Due soon", resident.paidAt || ""])
+    ...state.residents.map((resident) => [resident.name, formatPhilippinesPhone(resident.phone), resident.email || "", resident.lot, resident.street, resident.monthlyDues, currentMonth, isPaid(resident) ? "Paid" : paymentStatus(resident) === "overdue" ? "Overdue" : "Due soon", resident.paidAt || ""])
   ];
   const csv = rows.map((row) => row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -334,25 +513,56 @@ document.querySelectorAll("[data-open-add]").forEach((button) => button.addEvent
 document.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", exportCSV));
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
-  const button = event.target.closest("[data-mark-paid], [data-mark-unpaid], [data-select-resident], [data-view-residents]");
+  const button = event.target.closest("[data-table-page]");
+  if (!button || button.disabled) return;
+  const key = button.dataset.tablePage;
+  tablePages[key] = Number(button.dataset.page);
+  if (key === "overview") renderOverviewTable();
+  if (key === "residents") renderResidentsTable(document.getElementById("resident-search")?.value || "");
+  if (key === "payments") renderPaymentsTable(document.getElementById("payment-search")?.value || "");
+});
+document.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("[data-mark-paid], [data-mark-unpaid], [data-select-resident], [data-view-residents], [data-view-resident], [data-edit-resident], [data-delete-resident]");
   if (!button) return;
   if (button.hasAttribute("data-mark-paid")) markPaid(button.dataset.markPaid);
   else if (button.hasAttribute("data-mark-unpaid")) markUnpaid(button.dataset.markUnpaid);
+  else if (button.hasAttribute("data-view-resident")) openResidentDetails(button.dataset.viewResident);
   else if (button.hasAttribute("data-select-resident")) {
     event.preventDefault();
     selectResident(button.dataset.selectResident);
-  }
+  } else if (button.hasAttribute("data-edit-resident")) { closeResidentDetails(); editResident(button.dataset.editResident); }
+  else if (button.hasAttribute("data-delete-resident")) deleteResident(button.dataset.deleteResident);
 });
 document.getElementById("export-button")?.addEventListener("click", exportCSV);
 document.getElementById("payments-export-button")?.addEventListener("click", exportCSV);
-document.getElementById("resident-search")?.addEventListener("input", (event) => renderResidentsTable(event.target.value));
-document.getElementById("payment-search")?.addEventListener("input", (event) => renderPaymentsTable(event.target.value));
+document.getElementById("resident-search")?.addEventListener("input", (event) => { tablePages.residents = 1; renderResidentsTable(event.target.value); });
+document.getElementById("payment-search")?.addEventListener("input", (event) => { tablePages.payments = 1; renderPaymentsTable(event.target.value); });
+document.getElementById("payment-status-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
+document.querySelector('#resident-form [name="phone"]')?.addEventListener("input", (event) => {
+  const input = event.currentTarget;
+  let digits = input.value.replace(/\D/g, "");
+  if (digits.startsWith("63")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  input.value = digits.slice(0, 10);
+  input.setCustomValidity(input.value && !/^9\d{9}$/.test(input.value)
+    ? "Enter 10 digits starting with 9 after +63."
+    : "");
+});
+document.querySelector('#resident-form [name="phone"]')?.addEventListener("keydown", (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return;
+  if (!/\d/.test(event.key)) event.preventDefault();
+});
 document.getElementById("modal-close")?.addEventListener("click", closeModal);
+document.getElementById("resident-details-close")?.addEventListener("click", closeResidentDetails);
 document.getElementById("resident-modal")?.addEventListener("click", (event) => {
   if (event.target.id === "resident-modal") closeModal();
 });
+document.getElementById("resident-details-modal")?.addEventListener("click", (event) => {
+  if (event.target.id === "resident-details-modal") closeResidentDetails();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeModal();
+  if (event.key === "Escape") { closeModal(); closeResidentDetails(); }
 });
 document.getElementById("notifications-button")?.addEventListener("click", () => {
   const pending = state.residents.filter((resident) => !isPaid(resident)).length;
@@ -361,16 +571,29 @@ document.getElementById("notifications-button")?.addEventListener("click", () =>
 document.getElementById("resident-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
+  const latitude = Number(formData.get("latitude"));
+  const longitude = Number(formData.get("longitude"));
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !formData.get("latitude") || !formData.get("longitude")) {
+    showToast("Choose the resident's home on the map first.");
+    return;
+  }
   const resident = {
-    id: `resident-${Date.now()}`,
+    ...(editingResidentId ? state.residents.find((item) => item.id === editingResidentId) : {}),
+    id: editingResidentId || `resident-${Date.now()}`,
     name: String(formData.get("name")).trim(),
-    phone: String(formData.get("phone")).trim(),
+    phone: `+63${philippinesMobileDigits(formData.get("phone"))}`,
     email: String(formData.get("email")).trim(),
     lot: String(formData.get("lot")).trim().toUpperCase(),
     street: String(formData.get("street")).trim(),
+    latitude,
+    longitude,
     monthlyDues: Number(formData.get("monthlyDues")),
   };
-  if (state.residents.some((item) => item.lot.toLowerCase() === resident.lot.toLowerCase())) {
+  if (!/^9\d{9}$/.test(philippinesMobileDigits(formData.get("phone")))) {
+    showToast("Enter a valid Philippine mobile number: 10 digits starting with 9.");
+    return;
+  }
+  if (resident.lot && state.residents.some((item) => item.id !== editingResidentId && item.lot?.toLowerCase() === resident.lot.toLowerCase())) {
     showToast("That house or lot number is already in use.");
     return;
   }
@@ -378,12 +601,18 @@ document.getElementById("resident-form")?.addEventListener("submit", (event) => 
     showToast("Enter a valid monthly dues amount.");
     return;
   }
-  state.residents.push(resident);
+  if (editingResidentId) {
+    state.residents = state.residents.map((item) => item.id === editingResidentId ? resident : item);
+  } else {
+    state.residents.push(resident);
+  }
+  const wasEditing = Boolean(editingResidentId);
+  editingResidentId = null;
   saveState();
   event.currentTarget.reset();
   closeModal();
   render();
-  showToast(`${resident.name} was added to the community.`);
+  showToast(wasEditing ? `${resident.name}'s details were updated.` : `${resident.name} was added to the community.`);
 });
 document.getElementById("settings-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -403,6 +632,90 @@ document.getElementById("settings-form")?.addEventListener("submit", (event) => 
   render();
 });
 
+document.getElementById("admin-account-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.getElementById("admin-account-status");
+  const submit = document.getElementById("admin-account-submit");
+  const currentPassword = String(form.elements.currentPassword.value);
+  const newEmail = String(form.elements.newEmail.value).trim().toLowerCase();
+  const newPassword = String(form.elements.newPassword.value);
+  const confirmPassword = String(form.elements.confirmPassword.value);
+  const user = auth?.currentUser;
+  status.classList.remove("error");
+  status.textContent = "";
+  if (!user?.email) {
+    status.textContent = "No signed-in email/password admin account was found.";
+    status.classList.add("error");
+    return;
+  }
+  if (!newEmail && !newPassword) {
+    status.textContent = "Enter a new email or password first.";
+    status.classList.add("error");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    status.textContent = "The new password and confirmation do not match.";
+    status.classList.add("error");
+    return;
+  }
+  const updateEmailAddress = newEmail && newEmail !== user.email.toLowerCase();
+  const updatePasswordValue = Boolean(newPassword);
+  if (!updateEmailAddress && !updatePasswordValue) {
+    status.textContent = "The new email is already your current email.";
+    status.classList.add("error");
+    return;
+  }
+
+  submit.disabled = true;
+  submit.textContent = "Updating…";
+  try {
+    const { EmailAuthProvider, reauthenticateWithCredential, verifyBeforeUpdateEmail, updatePassword } = await import("https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js");
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword));
+    const completed = [];
+    const errors = [];
+    if (updateEmailAddress) {
+      try {
+        await verifyBeforeUpdateEmail(user, newEmail);
+        completed.push("A verification link was sent to the new email.");
+      } catch (error) { errors.push(error); }
+    }
+    if (updatePasswordValue) {
+      try {
+        await updatePassword(user, newPassword);
+        completed.push("Password updated.");
+      } catch (error) { errors.push(error); }
+    }
+    if (completed.length) {
+      status.textContent = [...completed, ...errors.map((error) => authAccountError(error))].join(" ");
+      if (errors.length) status.classList.add("error");
+      form.elements.currentPassword.value = "";
+      form.elements.newPassword.value = "";
+      form.elements.confirmPassword.value = "";
+      if (!errors.length) form.elements.newEmail.value = "";
+    } else {
+      status.textContent = authAccountError(errors[0]);
+      status.classList.add("error");
+    }
+  } catch (error) {
+    status.textContent = authAccountError(error);
+    status.classList.add("error");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Update sign-in details";
+  }
+});
+
+function authAccountError(error) {
+  const code = String(error?.code || "").toLowerCase();
+  if (code.includes("wrong-password") || code.includes("invalid-credential")) return "Current password is incorrect.";
+  if (code.includes("email-already-in-use")) return "That email is already used by another account.";
+  if (code.includes("invalid-email")) return "Enter a valid email address.";
+  if (code.includes("weak-password")) return "Choose a stronger password.";
+  if (code.includes("requires-recent-login")) return "Sign out and sign in again, then retry this change.";
+  return error?.message || "Could not update the admin sign-in details.";
+}
+
 document.title = `${document.body.dataset.page === "overview" ? "Overview" : document.body.dataset.page === "map" ? "Community map" : document.body.dataset.page === "payments" ? "Monthly dues" : document.body.dataset.page === "residents" ? "Residents" : document.body.dataset.page === "reports" ? "Reports" : "Settings"} — ${state.settings.communityName}`;
 const settingsForm = document.getElementById("settings-form");
 if (settingsForm) {
@@ -414,6 +727,11 @@ const mapResident = new URLSearchParams(window.location.search).get("resident");
 if (mapResident) selectedResidentId = mapResident;
 async function startApp() {
   try {
+    await authReady;
+    if (!auth?.currentUser) return;
+    const adminEmailField = document.getElementById("admin-current-email");
+    if (adminEmailField) adminEmailField.value = auth.currentUser.email || "";
+    render();
     const cloudState = await loadCommunity();
     if (cloudState && Array.isArray(cloudState.residents) && cloudState.settings) {
       state = { residents: cloudState.residents, settings: { ...defaultSettings, ...cloudState.settings } };

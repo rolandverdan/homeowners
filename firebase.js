@@ -4,8 +4,10 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-auth
 import { firebaseConfig } from "./firebase-config.js";
 
 const configured = firebaseConfig.apiKey !== "YOUR_API_KEY" && firebaseConfig.projectId !== "YOUR_PROJECT_ID";
-const db = configured ? getFirestore(initializeApp(firebaseConfig)) : null;
+const firebaseApp = configured ? initializeApp(firebaseConfig) : null;
+const db = firebaseApp ? getFirestore(firebaseApp) : null;
 export const auth = configured ? getAuth() : null;
+export const authReady = auth ? auth.authStateReady() : Promise.resolve();
 const communityRef = db ? doc(db, "communities", "bistekville") : null;
 
 export async function loadCommunity() {
@@ -18,3 +20,4 @@ export async function saveCommunity(community) {
   if (!communityRef) throw new Error("Add your Firebase web app settings to firebase-config.js.");
   await setDoc(communityRef, { ...community, updatedAt: serverTimestamp() });
 }
+
