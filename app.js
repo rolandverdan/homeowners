@@ -3,7 +3,7 @@ import { auth, authReady, loadCommunity, saveCommunity } from "./firebase.js";
 const STORAGE_KEY = "haven-community-admin-v1";
 const DATA_VERSION = 2;
 
-const defaultSettings = { communityName: "Bistek Village", defaultMonthlyDues: 0, dueDay: 5 };
+const defaultSettings = { communityName: "Bistek Village", adminName: "Community Admin", defaultMonthlyDues: 0, dueDay: 5 };
 const mapDefaultCenter = [14.732702501957057, 121.04251314283857];
 const today = new Date();
 const currentMonth = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(today);
@@ -36,7 +36,8 @@ function loadState() {
             monthlyDues: needsDuesMigration
               ? defaultSettings.defaultMonthlyDues
               : Number(resident.monthlyDues ?? defaultSettings.defaultMonthlyDues),
-            paidMonth: resident.paidMonth || (resident.paid && (!resident.paidAt || resident.paidAt.startsWith(currentMonthShort)) ? currentMonthKey : null)
+            paidMonth: resident.paidMonth || (resident.paid && (!resident.paidAt || resident.paidAt.startsWith(currentMonthShort)) ? currentMonthKey : null),
+            ...normalizePaymentHistory(resident)
           };
           delete migratedResident.rent;
           return migratedResident;
@@ -122,7 +123,28 @@ function rowAction(label, icon, attributes, tag = "button", href = "#") {
 }
 
 function isPaid(resident) {
-  return resident.paidMonth === currentMonthKey;
+  return resident.paidMonth === currentMonthKey || resident.paidMonths?.includes(currentMonthKey);
+}
+
+function normalizePaymentHistory(resident) {
+  const paidMonths = new Set(Array.isArray(resident.paidMonths) ? resident.paidMonths.filter((month) => /^\d{4}-\d{2}$/.test(month)) : []);
+  if (/^\d{4}-\d{2}$/.test(resident.paidMonth || "")) paidMonths.add(resident.paidMonth);
+  if (resident.paid && (!resident.paidAt || resident.paidAt.startsWith(currentMonthShort))) paidMonths.add(currentMonthKey);
+  const paidDates = resident.paidDates && typeof resident.paidDates === "object" ? { ...resident.paidDates } : {};
+  if (/^\d{4}-\d{2}-\d{2}$/.test(resident.paidDate || "")) {
+    const month = resident.paidDate.slice(0, 7);
+    paidMonths.add(month);
+    paidDates[month] = resident.paidDate;
+  }
+  return { paidMonths: [...paidMonths], paidDates };
+}
+
+function paymentStatusForMonth(resident, monthKey) {
+  if (resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey) return "Paid";
+  const [year, month] = monthKey.split("-").map(Number);
+  const dueDate = new Date(year, month - 1, Number(state.settings.dueDay));
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return dueDate < todayDate ? "Overdue" : "Due soon";
 }
 
 function paymentDateLabel(resident) {
@@ -203,7 +225,19 @@ function render() {
     animateFill(element, value);
   };
   setText("resident-count", state.residents.length);
+  const adminName = state.settings.adminName || defaultSettings.adminName;
+  const adminInitials = adminName === defaultSettings.adminName ? "AM" : initials(adminName);
+  document.querySelectorAll("[data-admin-name]").forEach((element) => { element.textContent = adminName; });
+  document.querySelectorAll("[data-admin-initials]").forEach((element) => { element.textContent = adminInitials; });
   document.querySelectorAll("[data-community-name]").forEach((element) => { element.textContent = state.settings.communityName; });
+  const settingsForm = document.getElementById("settings-form");
+  if (settingsForm) {
+    settingsForm.querySelector('[name="communityName"]').value = state.settings.communityName;
+    settingsForm.querySelector('[name="defaultMonthlyDues"]').value = state.settings.defaultMonthlyDues;
+    settingsForm.querySelector('[name="dueDay"]').value = state.settings.dueDay;
+  }
+  const adminProfileForm = document.getElementById("admin-profile-form");
+  if (adminProfileForm) adminProfileForm.elements.adminName.value = adminName;
 
   if (document.getElementById("stat-residents")) {
     setText("period-chip", currentMonth);
@@ -404,10 +438,12 @@ function markPaid(id) {
   const resident = state.residents.find((item) => item.id === id);
   if (!resident) return;
   resident.paidMonth = currentMonthKey;
+  resident.paidMonths = [...new Set([...(resident.paidMonths || []), currentMonthKey])];
   delete resident.paid;
   delete resident.paidProofKey;
   delete resident.paidProofName;
   resident.paidDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  resident.paidDates = { ...(resident.paidDates || {}), [currentMonthKey]: resident.paidDate };
   resident.paidAt = paymentDateLabel(resident);
   saveState();
   render();
@@ -418,6 +454,9 @@ function markPaid(id) {
 function markUnpaid(id) {
   const resident = state.residents.find((item) => item.id === id);
   if (!resident) return;
+  resident.paidMonths = (resident.paidMonths || []).filter((month) => month !== currentMonthKey);
+  resident.paidDates = { ...(resident.paidDates || {}) };
+  delete resident.paidDates[currentMonthKey];
   delete resident.paidMonth;
   delete resident.paid;
   delete resident.paidAt;
@@ -534,23 +573,49 @@ function closeModal() {
   document.getElementById("resident-modal")?.classList.add("hidden");
 }
 
-function exportCSV() {
+function openExportModal() {
+  const form = document.getElementById("export-form");
+  if (!form) return;
+  const month = form.elements.month;
+  month.value = currentMonthKey;
+  month.max = currentMonthKey;
+  document.getElementById("export-modal")?.classList.remove("hidden");
+  month.focus();
+}
+
+function closeExportModal() {
+  document.getElementById("export-modal")?.classList.add("hidden");
+}
+
+function exportCSV(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(monthKey || "") || monthKey > currentMonthKey) {
+    showToast("Choose a valid month up to the current month.");
+    return;
+  }
+  const monthLabel = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(`${monthKey}-01T00:00:00`));
+  const hasRecordedPayment = state.residents.some((resident) => resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey);
+  const hasCurrentMonthRegister = monthKey === currentMonthKey && state.residents.length > 0;
+  if (!hasRecordedPayment && !hasCurrentMonthRegister) {
+    showToast(`No payment data is recorded for ${monthLabel}. Choose another month.`);
+    return;
+  }
   const rows = [
     ["Resident", "Phone", "Email", "Lot", "Street", "Monthly dues", "Month", "Status", "Paid date"],
-    ...state.residents.map((resident) => [resident.name, formatPhilippinesPhone(resident.phone), resident.email || "", resident.lot, resident.street, resident.monthlyDues, currentMonth, isPaid(resident) ? "Paid" : paymentStatus(resident) === "overdue" ? "Overdue" : "Due soon", resident.paidAt || ""])
+    ...state.residents.map((resident) => [resident.name, formatPhilippinesPhone(resident.phone), resident.email || "", resident.lot, resident.street, resident.monthlyDues, monthLabel, paymentStatusForMonth(resident, monthKey), resident.paidDates?.[monthKey] || (resident.paidDate?.startsWith(monthKey) ? resident.paidDate : "")])
   ];
   const csv = rows.map((row) => row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `bistek-village-dues-report-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}.csv`;
+  link.download = `bistek-village-dues-report-${monthKey}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  showToast("Your monthly dues report has been downloaded.");
+  closeExportModal();
+  showToast(`${monthLabel} dues report downloaded.`);
 }
 
 document.querySelectorAll("[data-open-add]").forEach((button) => button.addEventListener("click", openModal));
-document.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", exportCSV));
+document.querySelectorAll("[data-export]").forEach((button) => button.addEventListener("click", openExportModal));
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
   const button = event.target.closest("[data-table-page]");
@@ -574,8 +639,13 @@ document.addEventListener("click", (event) => {
   } else if (button.hasAttribute("data-edit-resident")) { closeResidentDetails(); editResident(button.dataset.editResident); }
   else if (button.hasAttribute("data-delete-resident")) deleteResident(button.dataset.deleteResident);
 });
-document.getElementById("export-button")?.addEventListener("click", exportCSV);
-document.getElementById("payments-export-button")?.addEventListener("click", exportCSV);
+document.getElementById("payments-export-button")?.addEventListener("click", openExportModal);
+document.getElementById("export-close")?.addEventListener("click", closeExportModal);
+document.getElementById("export-cancel")?.addEventListener("click", closeExportModal);
+document.getElementById("export-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  exportCSV(event.currentTarget.elements.month.value);
+});
 document.getElementById("resident-search")?.addEventListener("input", (event) => { tablePages.residents = 1; renderResidentsTable(event.target.value); });
 document.getElementById("payment-search")?.addEventListener("input", (event) => { tablePages.payments = 1; renderPaymentsTable(event.target.value); });
 document.getElementById("payment-status-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
@@ -602,7 +672,10 @@ document.getElementById("resident-details-modal")?.addEventListener("click", (ev
   if (event.target.id === "resident-details-modal") closeResidentDetails();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { closeModal(); closeResidentDetails(); }
+  if (event.key === "Escape") { closeModal(); closeResidentDetails(); closeExportModal(); }
+});
+document.getElementById("export-modal")?.addEventListener("click", (event) => {
+  if (event.target.id === "export-modal") closeExportModal();
 });
 document.getElementById("notifications-button")?.addEventListener("click", () => {
   const pending = state.residents.filter((resident) => !isPaid(resident)).length;
@@ -664,12 +737,28 @@ document.getElementById("settings-form")?.addEventListener("submit", (event) => 
     showToast("Check the community settings and try again.");
     return;
   }
-  state.settings = { communityName, defaultMonthlyDues, dueDay };
+  state.settings = { ...state.settings, communityName, defaultMonthlyDues, dueDay };
   saveState();
   document.title = `${communityName} — Settings`;
   document.getElementById("settings-saved").textContent = "Changes saved";
   window.setTimeout(() => { document.getElementById("settings-saved").textContent = ""; }, 2500);
   render();
+});
+document.getElementById("admin-profile-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const adminName = String(new FormData(event.currentTarget).get("adminName") || "").trim();
+  if (!adminName) {
+    showToast("Enter an admin display name.");
+    return;
+  }
+  state.settings = { ...state.settings, adminName };
+  saveState();
+  render();
+  const saved = document.getElementById("admin-profile-saved");
+  if (saved) {
+    saved.textContent = "Name saved";
+    window.setTimeout(() => { saved.textContent = ""; }, 2500);
+  }
 });
 
 document.getElementById("admin-account-form")?.addEventListener("submit", async (event) => {
@@ -757,12 +846,6 @@ function authAccountError(error) {
 }
 
 document.title = `${document.body.dataset.page === "overview" ? "Overview" : document.body.dataset.page === "map" ? "Community map" : document.body.dataset.page === "payments" ? "Monthly dues" : document.body.dataset.page === "residents" ? "Residents" : document.body.dataset.page === "reports" ? "Reports" : "Settings"} — ${state.settings.communityName}`;
-const settingsForm = document.getElementById("settings-form");
-if (settingsForm) {
-  settingsForm.querySelector('[name="communityName"]').value = state.settings.communityName;
-  settingsForm.querySelector('[name="defaultMonthlyDues"]').value = state.settings.defaultMonthlyDues;
-  settingsForm.querySelector('[name="dueDay"]').value = state.settings.dueDay;
-}
 const mapResident = new URLSearchParams(window.location.search).get("resident");
 if (mapResident) selectedResidentId = mapResident;
 async function startApp() {
@@ -774,7 +857,10 @@ async function startApp() {
     render();
     const cloudState = await loadCommunity();
     if (cloudState && Array.isArray(cloudState.residents) && cloudState.settings) {
-      state = { residents: cloudState.residents, settings: { ...defaultSettings, ...cloudState.settings } };
+      state = {
+        residents: cloudState.residents.map((resident) => ({ ...resident, ...normalizePaymentHistory(resident) })),
+        settings: { ...defaultSettings, ...cloudState.settings }
+      };
       cacheState();
     } else {
       state = loadState();

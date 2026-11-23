@@ -17,13 +17,10 @@ if (content) {
         <a class="nav-link ${page === "payments" ? "active" : ""}" href="payments.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18m-13 5h3"/></svg></span>Monthly dues</a>
         <a class="nav-link ${page === "map" ? "active" : ""}" href="map.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15m6-12v15"/></svg></span>Property map</a>
         <a class="nav-link ${page === "reports" ? "active" : ""}" href="reports.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-7m5 7V7"/></svg></span>Reports</a>
-      </nav>
-      <div class="side-label tools-label">MANAGE</div>
-      <nav class="side-nav" aria-label="Management navigation">
         <a class="nav-link ${page === "settings" ? "active" : ""}" href="settings.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a7.8 7.8 0 0 1-1.8 1l-.3 1.8h-2.8l-.3-1.8a7.8 7.8 0 0 1-1.8-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a7.8 7.8 0 0 1 1.8-1l.3-1.8h2.8l.3 1.8a7.8 7.8 0 0 1 1.8 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z" transform="translate(-1 -1) scale(1.08)"/></svg></span>Settings</a>
       </nav>
       <div class="sidebar-bottom">
-        <div class="profile-button"><span class="avatar admin-avatar">AM</span><span class="profile-copy"><strong>Community Admin</strong><small>Administrator</small></span><button class="profile-logout" id="logout-button" type="button">Sign out</button></div>
+        <div class="profile-button"><span class="avatar admin-avatar" data-admin-initials>AM</span><span class="profile-copy"><strong data-admin-name>Community Admin</strong><small>Administrator</small></span><button class="profile-logout" id="logout-button" type="button">Sign out</button></div>
       </div>
     </aside>
     <button class="sidebar-backdrop hidden" id="sidebar-backdrop" type="button" aria-label="Close navigation"></button>
@@ -46,6 +43,13 @@ if (content) {
           <label>Monthly dues (₱)<input name="monthlyDues" type="number" min="0" step="50" placeholder="0" required /></label>
         </div><label class="location-label">Choose home location <span class="location-hint" id="location-hint">Click the map to place a pin.</span><div class="location-picker" id="location-picker" role="application" aria-label="Choose resident location on the map"></div><input type="hidden" name="latitude" required /><input type="hidden" name="longitude" required /></label><div class="form-footer"><p>Monthly dues start as unpaid for the current month.</p><button class="button button-primary" id="resident-submit" type="submit">Add resident</button></div></form>
       </div>
+    </div>
+    <div class="modal-backdrop hidden" id="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+      <form class="modal-card export-modal-card" id="export-form">
+        <div class="modal-header"><div><h2 id="export-modal-title">Export dues report</h2></div><button class="modal-close" id="export-close" type="button" aria-label="Close dialog">×</button></div>
+        <div class="export-modal-content"><label for="export-month">Choose month and year</label><input id="export-month" name="month" type="month" required /><p>Only payment history recorded in this account is included; older months may be incomplete.</p></div>
+        <div class="export-modal-actions"><button class="button button-secondary" id="export-cancel" type="button">Cancel</button><button class="button button-primary" type="submit">Download CSV</button></div>
+      </form>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>`;
   const menuButton = document.getElementById("mobile-menu");
