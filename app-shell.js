@@ -72,6 +72,6 @@ if (content) {
     if (!pageWrap || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     event.preventDefault();
     pageWrap.classList.add("is-leaving");
-    window.setTimeout(() => { window.location.href = destination.href; }, 150);
+    window.setTimeout(() => { window.location.href = destination.href; }, 320);
   });
 }

@@ -11,6 +11,7 @@ const currentMonthShort = new Intl.DateTimeFormat("en", { month: "short" }).form
 const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 const TABLE_PAGE_SIZE = 10;
 const tablePages = { overview: 1, residents: 1, payments: 1 };
+const fillStates = new WeakMap();
 let dataNeedsSaving = false;
 let toastTimer;
 let state = loadState();
@@ -60,12 +61,16 @@ function loadState() {
   };
 }
 
-function saveState() {
+function cacheState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, dataVersion: DATA_VERSION }));
   } catch (error) {
     console.error("Could not save community data.", error);
   }
+}
+
+function saveState() {
+  cacheState();
   saveCommunity({ ...state, dataVersion: DATA_VERSION }).catch((error) => {
     console.error("Could not save community data to Firestore.", error);
     showToast("Firestore save failed. Check Firebase setup and Firestore rules.");
@@ -134,6 +139,41 @@ function paymentStatus(resident) {
   return todayDate > dueDate ? "overdue" : "due";
 }
 
+function animateFill(element, percent, property = "width") {
+  if (!element) return;
+  const target = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+  let fillState = fillStates.get(element);
+  const setValue = (value) => property === "width"
+    ? element.style.setProperty("width", value)
+    : element.style.setProperty(property, value);
+  if (fillState) {
+    fillState.target = target;
+    if (fillState.ready) setValue(target);
+    return;
+  }
+  fillState = { target, ready: false };
+  fillStates.set(element, fillState);
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    fillState.ready = true;
+    setValue(target);
+    return;
+  }
+  setValue("0%");
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fillState.ready = true;
+    setValue(fillState.target);
+  }));
+}
+
+function revealLoadedData() {
+  const page = document.querySelector(".page-wrap");
+  if (!page || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  page.classList.remove("data-arrive");
+  void page.offsetWidth;
+  page.classList.add("data-arrive");
+  window.setTimeout(() => page.classList.remove("data-arrive"), 900);
+}
+
 function statusMarkup(resident) {
   const status = paymentStatus(resident);
   const labels = { paid: "Paid", due: "Due soon", overdue: "Overdue" };
@@ -160,7 +200,7 @@ function render() {
   };
   const setWidth = (id, value) => {
     const element = document.getElementById(id);
-    if (element) element.style.width = `${value}%`;
+    animateFill(element, value);
   };
   setText("resident-count", state.residents.length);
   document.querySelectorAll("[data-community-name]").forEach((element) => { element.textContent = state.settings.communityName; });
@@ -202,7 +242,7 @@ function render() {
   setWidth("report-progress", rate);
   setText("donut-rate", `${rate}%`);
   const donut = document.getElementById("report-donut");
-  if (donut) donut.style.background = `conic-gradient(#84a26b 0% ${rate}%, #edf0e9 ${rate}% 100%)`;
+  if (donut) animateFill(donut, rate, "--collection-rate");
   setText("report-legend-paid", `${paidResidents.length} residents · ${formatCurrency(paidTotal)}`);
   setText("report-legend-due", `${dueCount} residents · ${formatCurrency(pendingResidents.filter((resident) => paymentStatus(resident) === "due").reduce((sum, resident) => sum + Number(resident.monthlyDues), 0))}`);
   setText("report-legend-late", `${overdueCount} residents · ${formatCurrency(pendingResidents.filter((resident) => paymentStatus(resident) === "overdue").reduce((sum, resident) => sum + Number(resident.monthlyDues), 0))}`);
@@ -735,11 +775,13 @@ async function startApp() {
     const cloudState = await loadCommunity();
     if (cloudState && Array.isArray(cloudState.residents) && cloudState.settings) {
       state = { residents: cloudState.residents, settings: { ...defaultSettings, ...cloudState.settings } };
+      cacheState();
     } else {
       state = loadState();
       await saveCommunity({ ...state, dataVersion: DATA_VERSION });
     }
     render();
+    revealLoadedData();
     if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
     if (dataNeedsSaving) {
       saveState();
