@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.web.bistekville_2c26c.twa",
+        "sha256_cert_fingerprints": ["2D:C3:AD:39:D1:75:D9:62:CA:A8:05:AA:01:0C:7A:A1:3A:84:B2:1A:9D:97:89:6E:70:42:95:A7:88:C4:52:33"]
+      }
+    }]

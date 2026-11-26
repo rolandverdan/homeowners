@@ -9,8 +9,13 @@
       ".firebaserc",
       ".firebase/**",
       ".git/**",
-      "**/.*",
-      "**/node_modules/**"
+      ".gitignore",
+      "**/node_modules/**",
+      "package.json",
+      "package-lock.json",
+      "firestore.rules",
+      "README.md",
+      "FIREBASE-SETUP.md"
     ]
   }
 }

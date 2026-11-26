@@ -1,0 +1,28 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "standalone",
+  "lang": "en-PH",
+  "name": "Bistek Village Home Owners Association",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "Bistek Village Admin",
+  "description": "Manage residents and monthly dues for Bistek Village Home Owners Association.",
+  "start_url": "/login.html",
+  "theme_color": "#176b9a",
+  "id": "/",
+  "icons": [
+    {
+      "src": "/images/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
