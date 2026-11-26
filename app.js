@@ -3,8 +3,7 @@ import { auth, authReady, loadCommunity, saveCommunity } from "./firebase.js";
 const STORAGE_KEY = "haven-community-admin-v1";
 const DATA_VERSION = 2;
 
-const defaultSettings = { communityName: "Bistek Village", adminName: "Community Admin", defaultMonthlyDues: 0, dueDay: 5 };
-const mapDefaultCenter = [14.732702501957057, 121.04251314283857];
+const defaultSettings = { communityName: "Bistek Village", adminName: "Community Admin", defaultMonthlyDues: 0, dueDay: 5, blockCount: 15, lotCount: 20 };
 const today = new Date();
 const currentMonth = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(today);
 const currentMonthShort = new Intl.DateTimeFormat("en", { month: "short" }).format(today);
@@ -17,11 +16,9 @@ let toastTimer;
 let state = loadState();
 let selectedResidentId = null;
 let editingResidentId = null;
-let communityMap;
-let miniMap;
-let mapMarkers;
-let pickerMap;
-let pickerMarker;
+let residentDetailsAllowEdit = true;
+let residentDetailsShowHistory = false;
+let residentHistoryYear = today.getFullYear();
 
 function loadState() {
   try {
@@ -48,7 +45,9 @@ function loadState() {
           communityName: needsDuesMigration ? defaultSettings.communityName : stored.settings.communityName,
           defaultMonthlyDues: needsDuesMigration
             ? defaultSettings.defaultMonthlyDues
-            : Number(stored.settings.defaultMonthlyDues ?? defaultSettings.defaultMonthlyDues)
+            : Number(stored.settings.defaultMonthlyDues ?? defaultSettings.defaultMonthlyDues),
+          blockCount: Number(stored.settings.blockCount ?? defaultSettings.blockCount),
+          lotCount: Number(stored.settings.lotCount ?? defaultSettings.lotCount)
         }
       };
     }
@@ -141,10 +140,51 @@ function normalizePaymentHistory(resident) {
 
 function paymentStatusForMonth(resident, monthKey) {
   if (resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey) return "Paid";
+  if (monthKey > currentMonthKey) return "Not due";
   const [year, month] = monthKey.split("-").map(Number);
   const dueDate = new Date(year, month - 1, Number(state.settings.dueDay));
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return dueDate < todayDate ? "Overdue" : "Due soon";
+}
+
+function isPaidForMonth(resident, monthKey) {
+  return resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey;
+}
+
+function statusMarkupForMonth(resident, monthKey) {
+  const status = paymentStatusForMonth(resident, monthKey);
+  const classes = { Paid: "paid", "Due soon": "due", Overdue: "overdue", "Not due": "upcoming" };
+  return `<span class="status-badge status-${classes[status]}">${status}</span>`;
+}
+
+function renderResidentPaymentHistory(resident) {
+  const recordedYears = (resident.paidMonths || []).map((month) => Number(month.slice(0, 4)));
+  const years = Array.from({ length: Math.max(16, today.getFullYear() + 6 - Math.min(today.getFullYear() - 10, ...recordedYears)) }, (_, index) => Math.min(today.getFullYear() - 10, ...recordedYears) + index);
+  if (!years.includes(residentHistoryYear)) residentHistoryYear = today.getFullYear();
+  const yearOptions = years.slice().reverse().map((year) => `<option value="${year}" ${year === residentHistoryYear ? "selected" : ""}>${year}</option>`).join("");
+  const rows = Array.from({ length: 12 }, (_, index) => {
+    const month = index + 1;
+    const monthKey = `${residentHistoryYear}-${String(month).padStart(2, "0")}`;
+    const monthLabel = new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(residentHistoryYear, index, 1));
+    const dueDate = `${monthLabel} ${state.settings.dueDay}, ${residentHistoryYear}`;
+    const paidDate = resident.paidDates?.[monthKey];
+    const paidDateLabel = paidDate ? new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${paidDate}T00:00:00`)) : "—";
+    const action = isPaidForMonth(resident, monthKey)
+      ? rowAction("Mark unpaid", "undo", `data-mark-unpaid="${escapeHTML(resident.id)}" data-payment-month="${monthKey}"`)
+      : rowAction("Mark paid", "paid", `data-mark-paid="${escapeHTML(resident.id)}" data-payment-month="${monthKey}"`);
+    const reference = resident.paymentReferences?.[monthKey] || "";
+    return `<tr><td>${monthLabel} ${residentHistoryYear}</td><td>${dueDate}</td><td>${statusMarkupForMonth(resident, monthKey)}</td><td>${paidDateLabel}</td><td><input class="payment-reference-input" type="text" maxlength="80" placeholder="Input Reference Number" aria-label="Reference number for ${monthLabel} ${residentHistoryYear}" data-payment-reference data-resident-id="${escapeHTML(resident.id)}" data-payment-month="${monthKey}" value="${escapeHTML(reference)}" /></td><td>${action}</td></tr>`;
+  }).join("");
+  return `<section class="resident-payment-history"><div class="resident-history-heading"><div><p class="eyebrow">PAYMENT HISTORY</p><h3>Monthly record</h3></div><label>Year<select id="resident-history-year">${yearOptions}</select></label></div><div class="payment-history-wrap"><table><thead><tr><th>MONTH</th><th>DUE DATE</th><th>STATUS</th><th>PAID ON</th><th>REFERENCE NUMBER (OPTIONAL)</th><th>ACTION</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
+
+function selectedPaymentsMonth() {
+  const picker = document.getElementById("payment-month-picker");
+  if (!picker) return currentMonthKey;
+  if (!picker.value) picker.value = currentMonthKey;
+  picker.max = currentMonthKey;
+  if (!/^\d{4}-\d{2}$/.test(picker.value) || picker.value > currentMonthKey) picker.value = currentMonthKey;
+  return picker.value;
 }
 
 function paymentDateLabel(resident) {
@@ -207,6 +247,8 @@ function residentCell(resident) {
 }
 
 function render() {
+  populatePropertyOptions();
+  populateBlockFilters();
   const total = state.residents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
   const paidResidents = state.residents.filter(isPaid);
   const pendingResidents = state.residents.filter((resident) => !isPaid(resident));
@@ -235,6 +277,8 @@ function render() {
     settingsForm.querySelector('[name="communityName"]').value = state.settings.communityName;
     settingsForm.querySelector('[name="defaultMonthlyDues"]').value = state.settings.defaultMonthlyDues;
     settingsForm.querySelector('[name="dueDay"]').value = state.settings.dueDay;
+    settingsForm.querySelector('[name="blockCount"]').value = state.settings.blockCount;
+    settingsForm.querySelector('[name="lotCount"]').value = state.settings.lotCount;
   }
   const adminProfileForm = document.getElementById("admin-profile-form");
   if (adminProfileForm) adminProfileForm.elements.adminName.value = adminName;
@@ -259,13 +303,6 @@ function render() {
     renderOverviewTable();
   }
 
-  setText("payments-collected", formatCurrency(paidTotal));
-  setText("payments-pending", formatCurrency(outstanding));
-  setText("payments-expected", formatCurrency(total));
-  setText("payments-paid-count", `${paidResidents.length} resident${paidResidents.length === 1 ? "" : "s"} paid`);
-  setText("payments-pending-count", `${pendingResidents.length} payment${pendingResidents.length === 1 ? "" : "s"} remaining`);
-  setText("payments-month-label", currentMonth);
-
   setText("report-period", currentMonth);
   setText("report-expected", formatCurrency(total));
   setText("report-collected", formatCurrency(paidTotal));
@@ -287,20 +324,46 @@ function render() {
   if (paymentSearch) renderPaymentsTable(paymentSearch.value);
   const pageCount = document.getElementById("resident-page-count");
   if (pageCount) pageCount.textContent = `All residents · ${state.residents.length}`;
-  const mappedHomes = state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).length;
-  setText("map-home-count", `${mappedHomes} mapped home${mappedHomes === 1 ? "" : "s"}`);
-  if (document.getElementById("mini-map") || document.getElementById("full-map")) renderMaps();
-  if (document.getElementById("selected-home")) renderSelectedHome();
+  renderPaymentHistoryPage();
+}
+
+function propertyLabel(resident) {
+  return resident.block ? `Block ${resident.block} · Lot ${resident.lot}` : resident.lot || "Not set";
+}
+
+function populatePropertyOptions() {
+  const form = document.getElementById("resident-form");
+  if (!form) return;
+  for (const [name, prefix, count] of [["block", "Block", Number(state.settings.blockCount) || 15], ["lot", "Lot", Number(state.settings.lotCount) || 20]]) {
+    const select = form.elements[name];
+    const previous = select.value;
+    select.innerHTML = `<option value="">Choose ${prefix.toLowerCase()}</option>${Array.from({ length: count }, (_, index) => `<option value="${index + 1}">${prefix} ${index + 1}</option>`).join("")}`;
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  }
+}
+
+function populateBlockFilters() {
+  const count = Number(state.settings.blockCount) || 15;
+  for (const id of ["resident-block-filter", "payment-block-filter"]) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    const selected = select.value || "all";
+    select.innerHTML = `<option value="all">All blocks</option>${Array.from({ length: count }, (_, index) => `<option value="${index + 1}">Block ${index + 1}</option>`).join("")}`;
+    select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
+  }
 }
 
 function renderResidentsTable(query = "") {
   const table = document.getElementById("residents-table");
   if (!table) return;
   const normalizedQuery = query.trim().toLowerCase();
-  const filtered = state.residents.filter((resident) => [resident.name, resident.email, resident.phone, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
+  const blockFilter = document.getElementById("resident-block-filter")?.value || "all";
+  const filtered = state.residents.filter((resident) => (blockFilter === "all" || String(resident.block) === blockFilter) && [resident.name, resident.email, resident.phone, resident.block, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery)));
   const pageItems = getTablePage(filtered, "residents");
-  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)}<br><span class="resident-email">${escapeHTML(resident.street)}</span></td><td>${escapeHTML(formatPhilippinesPhone(resident.phone))}<br><span class="resident-email">${escapeHTML(resident.email || "No email")}</span></td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td class="table-actions">${rowAction("View", "view", `data-view-resident="${escapeHTML(resident.id)}"`)}${rowAction("Edit", "edit", `data-edit-resident="${escapeHTML(resident.id)}"`)}${rowAction("Delete", "delete", `data-delete-resident="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(propertyLabel(resident))}<br><span class="resident-email">${escapeHTML(resident.street || "")}</span></td><td>${escapeHTML(formatPhilippinesPhone(resident.phone))}<br><span class="resident-email">${escapeHTML(resident.email || "No email")}</span></td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td class="table-actions">${rowAction("View", "view", `data-view-resident="${escapeHTML(resident.id)}"`)}${rowAction("Edit", "edit", `data-edit-resident="${escapeHTML(resident.id)}"`)}${rowAction("Delete", "delete", `data-delete-resident="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
   document.getElementById("residents-empty").classList.toggle("hidden", filtered.length > 0);
+  const heading = document.getElementById("resident-page-count");
+  if (heading) heading.textContent = `${blockFilter === "all" ? "All residents" : `Block ${blockFilter} residents`} · ${filtered.length}`;
   renderTablePagination("residents-pagination", filtered.length, "residents");
 }
 
@@ -308,17 +371,34 @@ function renderPaymentsTable(query = "") {
   const table = document.getElementById("payments-table");
   if (!table) return;
   const normalizedQuery = query.trim().toLowerCase();
+  const monthKey = selectedPaymentsMonth();
+  const blockFilter = document.getElementById("payment-block-filter")?.value || "all";
   const statusFilter = document.getElementById("payment-status-filter")?.value || "all";
   const filtered = state.residents.filter((resident) => {
-    const matchesQuery = [resident.name, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery));
-    return matchesQuery && (statusFilter === "all" || paymentStatus(resident) === statusFilter);
+    const matchesQuery = [resident.name, resident.block, resident.lot, resident.street].some((value) => String(value || "").toLowerCase().includes(normalizedQuery));
+    const monthStatus = { "Due soon": "due", Overdue: "overdue", Paid: "paid" }[paymentStatusForMonth(resident, monthKey)];
+    return matchesQuery && (blockFilter === "all" || String(resident.block) === blockFilter) && (statusFilter === "all" || monthStatus === statusFilter);
   });
   const pageItems = getTablePage(filtered, "payments");
-  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${escapeHTML(currentMonthShort)} ${Number(state.settings.dueDay)}, ${today.getFullYear()}</td><td>${statusMarkup(resident)}</td><td class="payment-actions">${rowAction("View resident", "view", `data-view-resident="${escapeHTML(resident.id)}"`)}${rowAction("Edit resident", "edit", `data-edit-resident="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
+  const [year, month] = monthKey.split("-").map(Number);
+  const dueDay = Math.min(Number(state.settings.dueDay), new Date(year, month, 0).getDate());
+  const dueDate = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(year, month - 1, dueDay));
+  const monthLabel = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(propertyLabel(resident))}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${escapeHTML(dueDate)}</td><td>${statusMarkupForMonth(resident, monthKey)}</td><td class="payment-actions">${rowAction("View payment history", "view", "", "a", `payment-history.html?resident=${encodeURIComponent(resident.id)}`)}</td></tr>`).join("");
   document.getElementById("payments-empty").classList.toggle("hidden", filtered.length > 0);
   const statusLabels = { all: "All payments", paid: "Paid payments", due: "Due soon", overdue: "Overdue" };
   const heading = document.getElementById("payments-page-count");
-  if (heading) heading.textContent = `${statusLabels[statusFilter]} · ${filtered.length}`;
+  if (heading) heading.textContent = `${monthLabel} · ${blockFilter === "all" ? statusLabels[statusFilter] : `Block ${blockFilter} · ${statusLabels[statusFilter]}`} · ${filtered.length}`;
+  const paidResidents = state.residents.filter((resident) => isPaidForMonth(resident, monthKey));
+  const pendingResidents = state.residents.filter((resident) => !isPaidForMonth(resident, monthKey));
+  const paidTotal = paidResidents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+  const expectedTotal = state.residents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+  document.getElementById("payments-collected").textContent = formatCurrency(paidTotal);
+  document.getElementById("payments-pending").textContent = formatCurrency(expectedTotal - paidTotal);
+  document.getElementById("payments-expected").textContent = formatCurrency(expectedTotal);
+  document.getElementById("payments-paid-count").textContent = `${paidResidents.length} resident${paidResidents.length === 1 ? "" : "s"} paid`;
+  document.getElementById("payments-pending-count").textContent = `${pendingResidents.length} payment${pendingResidents.length === 1 ? "" : "s"} remaining`;
+  document.getElementById("payments-month-label").textContent = monthLabel;
   renderTablePagination("payments-pagination", filtered.length, "payments");
 }
 
@@ -326,7 +406,7 @@ function renderOverviewTable() {
   const table = document.getElementById("overview-table");
   if (!table) return;
   const pageItems = getTablePage(state.residents, "overview");
-  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td>${isPaid(resident) ? `<span class="payment-date-action">Paid · ${escapeHTML(paymentDateLabel(resident))}</span>` : rowAction("Mark paid", "paid", `data-mark-paid="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
+  table.innerHTML = pageItems.map((resident) => `<tr><td>${residentCell(resident)}</td><td class="property-cell">${escapeHTML(propertyLabel(resident))}</td><td class="amount-cell">${formatCurrency(resident.monthlyDues)}</td><td>${statusMarkup(resident)}</td><td>${isPaid(resident) ? `<span class="payment-date-action">Paid · ${escapeHTML(paymentDateLabel(resident))}</span>` : rowAction("Mark paid", "paid", `data-mark-paid="${escapeHTML(resident.id)}"`)}</td></tr>`).join("");
   document.getElementById("overview-empty")?.classList.toggle("hidden", state.residents.length > 0);
   renderTablePagination("overview-pagination", state.residents.length, "overview");
 }
@@ -349,127 +429,56 @@ function renderTablePagination(elementId, itemCount, key) {
   container.innerHTML = `<span class="pagination-summary">Showing ${firstItem}–${lastItem} of ${itemCount}</span><div class="pagination-controls"><button type="button" data-table-page="${key}" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>Previous</button><span>Page ${page} of ${totalPages}</span><button type="button" data-table-page="${key}" data-page="${page + 1}" ${page >= totalPages ? "disabled" : ""}>Next</button></div>`;
 }
 
-function renderMaps() {
-  const mini = document.getElementById("mini-map");
-  const full = document.getElementById("full-map");
-  if (!mini && !full) return;
-  const setupMap = (element, zoom, interactive) => {
-    if (!element || !window.L) return null;
-    if (element._leaflet_id) return element === full ? communityMap : miniMap;
-    const map = L.map(element, { zoomControl: interactive, dragging: interactive, scrollWheelZoom: interactive, doubleClickZoom: interactive, boxZoom: interactive, keyboard: interactive, tap: interactive }).setView(mapDefaultCenter, zoom);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-    return map;
-  };
-  if (full && !communityMap) {
-    communityMap = setupMap(full, 16, true);
-    if (communityMap) mapMarkers = L.layerGroup().addTo(communityMap);
-  }
-  if (mini && !miniMap) miniMap = setupMap(mini, 15, false);
-  if (!mapMarkers && communityMap) mapMarkers = L.layerGroup().addTo(communityMap);
-  const makeResidentMarker = (resident) => {
-    const status = paymentStatus(resident);
-    const icon = L.divIcon({ className: "resident-marker-icon", html: `<span class="resident-map-pin ${status}"></span>`, iconSize: [22, 28], iconAnchor: [11, 26] });
-    return L.marker([Number(resident.latitude), Number(resident.longitude)], { icon });
-  };
-  if (mapMarkers) {
-    mapMarkers.clearLayers();
-    state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).forEach((resident) => {
-      const marker = makeResidentMarker(resident);
-      marker.on("click", () => selectResident(resident.id));
-      marker.addTo(mapMarkers);
-    });
-  }
-  if (miniMap) {
-    miniMap.eachLayer((layer) => { if (layer instanceof L.Marker) miniMap.removeLayer(layer); });
-    state.residents.filter((resident) => Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude))).forEach((resident) => makeResidentMarker(resident).addTo(miniMap));
-  }
-  const located = state.residents.find((resident) => resident.id === selectedResidentId && Number.isFinite(Number(resident.latitude)) && Number.isFinite(Number(resident.longitude)));
-  if (located && communityMap) communityMap.setView([Number(located.latitude), Number(located.longitude)], 18);
-  requestAnimationFrame(() => { communityMap?.invalidateSize(); miniMap?.invalidateSize(); });
-}
-
-function renderSelectedHome() {
-  const panel = document.getElementById("selected-home");
-  if (!panel) return;
-  const resident = state.residents.find((item) => item.id === selectedResidentId);
-  if (!resident) {
-    panel.innerHTML = `<div class="selected-empty"><span class="selected-house">⌂</span><h3>Select a home</h3><p>Choose a lot on the map to see resident and payment details.</p></div>`;
-    return;
-  }
-  panel.innerHTML = `<div class="selected-resident-head"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><span><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.lot)} · ${escapeHTML(resident.street)}</small></span></div><div class="selected-detail"><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div class="selected-detail"><span>Phone</span><strong>${escapeHTML(formatPhilippinesPhone(resident.phone))}</strong></div><div class="selected-detail"><span>Email</span><strong>${escapeHTML(resident.email || "Not provided")}</strong></div><div class="selected-detail"><span>This month</span><strong>${statusMarkup(resident)}</strong></div>${isPaid(resident) ? `<div class="selected-detail"><span>Paid on</span><strong>${escapeHTML(paymentDateLabel(resident))}</strong></div>` : ""}<div class="selected-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Undo payment</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark dues as paid</button>`}<button class="button button-secondary" data-edit-resident="${escapeHTML(resident.id)}">Edit resident</button><a class="button button-secondary" href="residents.html">View resident directory</a></div>`;
-}
-
-function selectResident(id) {
-  if (!id) return;
-  selectedResidentId = id;
-  renderSelectedHome();
-  const resident = state.residents.find((item) => item.id === id);
-  if (resident) {
-    if (resident.latitude != null && resident.longitude != null) communityMap?.setView([Number(resident.latitude), Number(resident.longitude)], 18, { animate: true });
-  }
-  if (window.matchMedia("(max-width: 640px)").matches) {
-    requestAnimationFrame(() => scrollToResidentDetails());
-  }
-}
-
-function scrollToResidentDetails() {
-  const panel = document.getElementById("selected-home");
-  if (!panel) return;
-  const startY = window.scrollY;
-  const targetY = Math.max(0, startY + panel.getBoundingClientRect().top - 68);
-  const distance = targetY - startY;
-  const duration = 650;
-  const startedAt = performance.now();
-  const animate = (now) => {
-    const progress = Math.min(1, (now - startedAt) / duration);
-    const eased = progress < 0.5
-      ? 4 * progress * progress * progress
-      : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-    window.scrollTo(0, startY + distance * eased);
-    if (progress < 1) requestAnimationFrame(animate);
-  };
-  requestAnimationFrame(animate);
-}
-
-function markPaid(id) {
+function markPaid(id, monthKey = currentMonthKey) {
   const resident = state.residents.find((item) => item.id === id);
   if (!resident) return;
-  resident.paidMonth = currentMonthKey;
-  resident.paidMonths = [...new Set([...(resident.paidMonths || []), currentMonthKey])];
-  delete resident.paid;
-  delete resident.paidProofKey;
-  delete resident.paidProofName;
-  resident.paidDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  resident.paidDates = { ...(resident.paidDates || {}), [currentMonthKey]: resident.paidDate };
-  resident.paidAt = paymentDateLabel(resident);
+  resident.paidMonths = [...new Set([...(resident.paidMonths || []), monthKey])];
+  if (monthKey === currentMonthKey) resident.paidMonth = currentMonthKey;
+  if (monthKey === currentMonthKey) {
+    delete resident.paid;
+    delete resident.paidProofKey;
+    delete resident.paidProofName;
+  }
+  const paidDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  resident.paidDates = { ...(resident.paidDates || {}), [monthKey]: paidDate };
+  if (monthKey === currentMonthKey) {
+    resident.paidDate = paidDate;
+    resident.paidAt = paymentDateLabel(resident);
+  }
   saveState();
   render();
   if (!document.getElementById("resident-details-modal")?.classList.contains("hidden")) renderResidentDetails(id);
-  showToast(`${resident.name}'s monthly dues marked as paid.`);
+  showToast(`${resident.name}'s ${monthKey} dues marked as paid.`);
 }
 
-function markUnpaid(id) {
+function markUnpaid(id, monthKey = currentMonthKey) {
   const resident = state.residents.find((item) => item.id === id);
   if (!resident) return;
-  resident.paidMonths = (resident.paidMonths || []).filter((month) => month !== currentMonthKey);
+  resident.paidMonths = (resident.paidMonths || []).filter((month) => month !== monthKey);
   resident.paidDates = { ...(resident.paidDates || {}) };
-  delete resident.paidDates[currentMonthKey];
-  delete resident.paidMonth;
-  delete resident.paid;
-  delete resident.paidAt;
-  delete resident.paidDate;
-  delete resident.paidProofKey;
-  delete resident.paidProofName;
+  delete resident.paidDates[monthKey];
+  resident.paymentReferences = { ...(resident.paymentReferences || {}) };
+  delete resident.paymentReferences[monthKey];
+  if (monthKey === currentMonthKey) {
+    delete resident.paidMonth;
+    delete resident.paid;
+    delete resident.paidAt;
+    delete resident.paidDate;
+    delete resident.paidProofKey;
+    delete resident.paidProofName;
+  }
   saveState();
   render();
   if (!document.getElementById("resident-details-modal")?.classList.contains("hidden")) renderResidentDetails(id);
-  showToast(`${resident.name}'s payment was marked unpaid.`);
+  showToast(`${resident.name}'s ${monthKey} payment was marked unpaid.`);
 }
 
-function openResidentDetails(id) {
+function openResidentDetails(id, allowEdit = true, showHistory = false) {
+  selectedResidentId = id;
+  residentDetailsAllowEdit = allowEdit;
+  residentDetailsShowHistory = showHistory;
+  residentHistoryYear = today.getFullYear();
+  document.querySelector(".resident-details-card")?.classList.toggle("history-enabled", showHistory);
   renderResidentDetails(id);
   document.getElementById("resident-details-modal")?.classList.remove("hidden");
 }
@@ -478,7 +487,25 @@ function renderResidentDetails(id) {
   const resident = state.residents.find((item) => item.id === id);
   if (!resident) return;
   document.getElementById("resident-details-title").textContent = resident.name;
-  document.getElementById("resident-details-content").innerHTML = `<div class="resident-details-summary"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><div><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.email || formatPhilippinesPhone(resident.phone))}</small></div></div><div class="resident-details-grid"><div><span>Phone</span><strong>${escapeHTML(formatPhilippinesPhone(resident.phone))}</strong></div><div><span>Email</span><strong>${escapeHTML(resident.email || "Not provided")}</strong></div><div><span>Property</span><strong>${escapeHTML([resident.lot, resident.street].filter(Boolean).join(" · ") || "Not provided")}</strong></div><div><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div><span>Payment status</span><strong>${statusMarkup(resident)}</strong></div>${isPaid(resident) ? `<div><span>Paid on</span><strong>${escapeHTML(paymentDateLabel(resident))}</strong></div>` : ""}</div><div class="resident-details-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Restore to unpaid</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark as paid</button>`}<button class="button button-secondary" data-edit-resident="${escapeHTML(resident.id)}">Edit resident</button></div>`;
+  document.getElementById("resident-details-content").innerHTML = `<div class="resident-details-summary"><span class="resident-avatar">${escapeHTML(initials(resident.name))}</span><div><strong>${escapeHTML(resident.name)}</strong><small>${escapeHTML(resident.email || formatPhilippinesPhone(resident.phone))}</small></div></div><div class="resident-details-grid"><div><span>Phone</span><strong>${escapeHTML(formatPhilippinesPhone(resident.phone))}</strong></div><div><span>Email</span><strong>${escapeHTML(resident.email || "Not provided")}</strong></div><div><span>Property</span><strong>${escapeHTML([propertyLabel(resident), resident.street].filter(Boolean).join(" · ") || "Not provided")}</strong></div><div><span>Monthly dues</span><strong>${formatCurrency(resident.monthlyDues)}</strong></div><div><span>Payment status</span><strong>${statusMarkup(resident)}</strong></div>${isPaid(resident) ? `<div><span>Paid on</span><strong>${escapeHTML(paymentDateLabel(resident))}</strong></div>` : ""}</div><div class="resident-details-actions">${isPaid(resident) ? `<button class="button button-secondary" data-mark-unpaid="${escapeHTML(resident.id)}">Restore to unpaid</button>` : `<button class="button button-primary" data-mark-paid="${escapeHTML(resident.id)}">Mark as paid</button>`}${residentDetailsAllowEdit ? `<button class="button button-secondary" data-edit-resident="${escapeHTML(resident.id)}">Edit resident</button>` : ""}</div>${residentDetailsShowHistory ? renderResidentPaymentHistory(resident) : ""}`;
+}
+
+function renderPaymentHistoryPage() {
+  const container = document.getElementById("resident-payment-history-content");
+  if (!container) return;
+  const residentId = new URLSearchParams(window.location.search).get("resident");
+  const resident = state.residents.find((item) => item.id === residentId);
+  if (!resident) {
+    container.innerHTML = `<div class="empty-state">Resident not found. <a href="payments.html">Return to monthly dues</a></div>`;
+    return;
+  }
+  selectedResidentId = resident.id;
+  residentDetailsAllowEdit = false;
+  residentDetailsShowHistory = true;
+  document.getElementById("resident-history-page-title").textContent = `${resident.name} payment history`;
+  document.title = `${resident.name} payment history — ${state.settings.communityName}`;
+  renderResidentDetails(resident.id);
+  container.innerHTML = document.getElementById("resident-details-content").innerHTML;
 }
 
 function closeResidentDetails() {
@@ -500,12 +527,10 @@ function openModal() {
   editingResidentId = null;
   form.reset();
   form.elements.phone.dispatchEvent(new Event("input", { bubbles: true }));
-  setPickerLocation(null, null);
   document.getElementById("modal-title").textContent = "Add a resident";
   document.getElementById("resident-submit").textContent = "Add resident";
   form.querySelector('[name="monthlyDues"]').value = state.settings.defaultMonthlyDues;
   document.getElementById("resident-modal").classList.remove("hidden");
-  initializePickerMap();
   form.querySelector('input[name="name"]').focus();
 }
 
@@ -514,50 +539,14 @@ function editResident(id) {
   const form = document.getElementById("resident-form");
   if (!resident || !form) return;
   editingResidentId = id;
-  for (const field of ["name", "phone", "email", "lot", "street", "monthlyDues"]) {
+  for (const field of ["name", "phone", "email", "block", "lot", "street", "monthlyDues"]) {
     form.elements[field].value = field === "phone" ? philippinesMobileDigits(resident.phone) : resident[field] ?? "";
   }
   form.elements.phone.dispatchEvent(new Event("input", { bubbles: true }));
   document.getElementById("modal-title").textContent = "Edit resident";
   document.getElementById("resident-submit").textContent = "Save changes";
   document.getElementById("resident-modal").classList.remove("hidden");
-  setPickerLocation(resident.latitude, resident.longitude);
-  initializePickerMap();
   form.querySelector('input[name="name"]').focus();
-}
-
-function setPickerLocation(latitude, longitude) {
-  const form = document.getElementById("resident-form");
-  if (!form) return;
-  const latInput = form.elements.latitude;
-  const lngInput = form.elements.longitude;
-  const hasLocation = Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude)) && latitude !== null && longitude !== null && latitude !== "" && longitude !== "";
-  latInput.value = hasLocation ? Number(latitude) : "";
-  lngInput.value = hasLocation ? Number(longitude) : "";
-  const hint = document.getElementById("location-hint");
-  if (hint) hint.textContent = hasLocation ? `${Number(latitude).toFixed(5)}, ${Number(longitude).toFixed(5)} · click to move pin` : "Click the map to place a pin.";
-  if (pickerMap && hasLocation) {
-    pickerMap.setView([Number(latitude), Number(longitude)], Math.max(pickerMap.getZoom(), 17));
-    if (pickerMarker) pickerMarker.setLatLng([Number(latitude), Number(longitude)]);
-    else pickerMarker = L.marker([Number(latitude), Number(longitude)]).addTo(pickerMap);
-  } else if (pickerMarker && !hasLocation) {
-    pickerMap.removeLayer(pickerMarker);
-    pickerMarker = null;
-  }
-}
-
-function initializePickerMap() {
-  const element = document.getElementById("location-picker");
-  if (!element || !window.L) return;
-  if (!pickerMap) {
-    pickerMap = L.map(element).setView(mapDefaultCenter, 17);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(pickerMap);
-    pickerMap.on("click", (event) => setPickerLocation(event.latlng.lat, event.latlng.lng));
-  }
-  window.setTimeout(() => pickerMap.invalidateSize(), 80);
 }
 
 function deleteResident(id) {
@@ -576,42 +565,141 @@ function closeModal() {
 function openExportModal() {
   const form = document.getElementById("export-form");
   if (!form) return;
-  const month = form.elements.month;
-  month.value = currentMonthKey;
-  month.max = currentMonthKey;
+  const year = form.elements.year;
+  year.value = String(today.getFullYear());
+  year.min = "2000";
+  year.max = String(today.getFullYear());
+  const block = form.elements.block;
+  block.innerHTML = `<option value="all">All blocks</option>${Array.from({ length: Number(state.settings.blockCount) || 15 }, (_, index) => `<option value="${index + 1}">Block ${index + 1}</option>`).join("")}`;
+  block.value = "all";
   document.getElementById("export-modal")?.classList.remove("hidden");
-  month.focus();
+  year.focus();
 }
 
 function closeExportModal() {
   document.getElementById("export-modal")?.classList.add("hidden");
 }
 
-function exportCSV(monthKey) {
-  if (!/^\d{4}-\d{2}$/.test(monthKey || "") || monthKey > currentMonthKey) {
-    showToast("Choose a valid month up to the current month.");
+function exportYearlyWorkbook(yearValue, blockValue = "all") {
+  const year = Number(yearValue);
+  if (!Number.isInteger(year) || year < 2000 || year > today.getFullYear()) {
+    showToast("Choose a valid year up to the current year.");
     return;
   }
-  const monthLabel = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(`${monthKey}-01T00:00:00`));
-  const hasRecordedPayment = state.residents.some((resident) => resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey);
-  const hasCurrentMonthRegister = monthKey === currentMonthKey && state.residents.length > 0;
-  if (!hasRecordedPayment && !hasCurrentMonthRegister) {
-    showToast(`No payment data is recorded for ${monthLabel}. Choose another month.`);
-    return;
-  }
+  const residents = blockValue === "all"
+    ? state.residents
+    : state.residents.filter((resident) => String(resident.block) === String(blockValue));
+  const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
   const rows = [
-    ["Resident", "Phone", "Email", "Lot", "Street", "Monthly dues", "Month", "Status", "Paid date"],
-    ...state.residents.map((resident) => [resident.name, formatPhilippinesPhone(resident.phone), resident.email || "", resident.lot, resident.street, resident.monthlyDues, monthLabel, paymentStatusForMonth(resident, monthKey), resident.paidDates?.[monthKey] || (resident.paidDate?.startsWith(monthKey) ? resident.paidDate : "")])
+    ["Block", "Lot", "Resident", ...months.map((monthKey) => `${new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(`${monthKey}-01T00:00:00`))} ${year}`)],
+    ...residents.map((resident) => [
+      resident.block || "",
+      resident.lot || "",
+      resident.name,
+      ...months.map((monthKey) => {
+        const paid = resident.paidMonths?.includes(monthKey) || resident.paidMonth === monthKey || Boolean(resident.paidDates?.[monthKey]);
+        if (!paid) return "";
+        const reference = resident.paymentReferences?.[monthKey]?.trim();
+        return reference ? `Paid (Ref: ${reference})` : "Paid";
+      })
+    ])
   ];
-  const csv = rows.map((row) => row.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const workbook = createXlsxWorkbook(rows, blockValue === "all" ? String(year) : `${year}-B${blockValue}`);
+  const url = URL.createObjectURL(workbook);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `bistek-village-dues-report-${monthKey}.csv`;
+  link.download = `bistek-village-dues-report-${year}${blockValue === "all" ? "" : `-block-${blockValue}`}.xlsx`;
   link.click();
   URL.revokeObjectURL(url);
   closeExportModal();
-  showToast(`${monthLabel} dues report downloaded.`);
+  showToast(`${year} dues report${blockValue === "all" ? "" : ` for Block ${blockValue}`} downloaded.`);
+}
+
+function createXlsxWorkbook(rows, year) {
+  const escapeXML = (value) => String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[character]);
+  const columnName = (number) => {
+    let name = "";
+    while (number > 0) {
+      number -= 1;
+      name = String.fromCharCode(65 + number % 26) + name;
+      number = Math.floor(number / 26);
+    }
+    return name;
+  };
+  const columns = rows[0].map((_, columnIndex) => {
+    const longest = Math.max(...rows.map((row) => String(row[columnIndex] ?? "").length));
+    const width = Math.min(60, Math.max(columnIndex === 0 ? 24 : 18, longest + 3));
+    return `<col min="${columnIndex + 1}" max="${columnIndex + 1}" width="${width}" bestFit="1" customWidth="1"/>`;
+  }).join("");
+  const sheetRows = rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((cell, columnIndex) => `<c r="${columnName(columnIndex + 1)}${rowIndex + 1}" t="inlineStr"${rowIndex === 0 ? ' s="1"' : ""}><is><t xml:space="preserve">${escapeXML(cell)}</t></is></c>`).join("")}</row>`).join("");
+  const lastColumn = columnName(rows[0].length);
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${year}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9EAD3"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyAlignment="1" applyFill="1" applyFont="1"><alignment vertical="center" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
+    ["xl/worksheets/sheet1.xml", `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols>${columns}</cols><sheetData>${sheetRows}</sheetData><autoFilter ref="A1:${lastColumn}${rows.length}"/><pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`]
+  ];
+  return zipStoredFiles(files);
+}
+
+function zipStoredFiles(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let localOffset = 0;
+  let centralSize = 0;
+  const crc32 = (bytes) => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  for (const [path, content] of files) {
+    const name = encoder.encode(path);
+    const data = encoder.encode(content);
+    const crc = crc32(data);
+    const localHeader = new Uint8Array(30 + name.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, data.length, true);
+    localView.setUint32(22, data.length, true);
+    localView.setUint16(26, name.length, true);
+    localHeader.set(name, 30);
+    localParts.push(localHeader, data);
+
+    const centralHeader = new Uint8Array(46 + name.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, data.length, true);
+    centralView.setUint32(24, data.length, true);
+    centralView.setUint16(28, name.length, true);
+    centralView.setUint32(42, localOffset, true);
+    centralHeader.set(name, 46);
+    centralParts.push(centralHeader);
+    localOffset += localHeader.length + data.length;
+    centralSize += centralHeader.length;
+  }
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, localOffset, true);
+  return new Blob([...localParts, ...centralParts, end], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 document.querySelectorAll("[data-open-add]").forEach((button) => button.addEventListener("click", openModal));
@@ -628,15 +716,13 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
-  const button = event.target.closest("[data-mark-paid], [data-mark-unpaid], [data-select-resident], [data-view-residents], [data-view-resident], [data-edit-resident], [data-delete-resident]");
+  const button = event.target.closest("[data-mark-paid], [data-mark-unpaid], [data-view-residents], [data-view-resident], [data-edit-resident], [data-delete-resident]");
   if (!button) return;
-  if (button.hasAttribute("data-mark-paid")) markPaid(button.dataset.markPaid);
-  else if (button.hasAttribute("data-mark-unpaid")) markUnpaid(button.dataset.markUnpaid);
-  else if (button.hasAttribute("data-view-resident")) openResidentDetails(button.dataset.viewResident);
-  else if (button.hasAttribute("data-select-resident")) {
-    event.preventDefault();
-    selectResident(button.dataset.selectResident);
-  } else if (button.hasAttribute("data-edit-resident")) { closeResidentDetails(); editResident(button.dataset.editResident); }
+  const paymentMonth = button.dataset.paymentMonth || (button.closest("#payments-table") ? selectedPaymentsMonth() : currentMonthKey);
+  if (button.hasAttribute("data-mark-paid")) markPaid(button.dataset.markPaid, paymentMonth);
+  else if (button.hasAttribute("data-mark-unpaid")) markUnpaid(button.dataset.markUnpaid, paymentMonth);
+  else if (button.hasAttribute("data-view-resident")) openResidentDetails(button.dataset.viewResident, !button.closest("#payments-table"), Boolean(button.closest("#payments-table")));
+  else if (button.hasAttribute("data-edit-resident")) { closeResidentDetails(); editResident(button.dataset.editResident); }
   else if (button.hasAttribute("data-delete-resident")) deleteResident(button.dataset.deleteResident);
 });
 document.getElementById("payments-export-button")?.addEventListener("click", openExportModal);
@@ -644,11 +730,14 @@ document.getElementById("export-close")?.addEventListener("click", closeExportMo
 document.getElementById("export-cancel")?.addEventListener("click", closeExportModal);
 document.getElementById("export-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
-  exportCSV(event.currentTarget.elements.month.value);
+  exportYearlyWorkbook(event.currentTarget.elements.year.value, event.currentTarget.elements.block.value);
 });
 document.getElementById("resident-search")?.addEventListener("input", (event) => { tablePages.residents = 1; renderResidentsTable(event.target.value); });
+document.getElementById("resident-block-filter")?.addEventListener("change", () => { tablePages.residents = 1; renderResidentsTable(document.getElementById("resident-search")?.value || ""); });
 document.getElementById("payment-search")?.addEventListener("input", (event) => { tablePages.payments = 1; renderPaymentsTable(event.target.value); });
+document.getElementById("payment-block-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
 document.getElementById("payment-status-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
+document.getElementById("payment-month-picker")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
 document.querySelector('#resident-form [name="phone"]')?.addEventListener("input", (event) => {
   const input = event.currentTarget;
   let digits = input.value.replace(/\D/g, "");
@@ -665,6 +754,23 @@ document.querySelector('#resident-form [name="phone"]')?.addEventListener("keydo
 });
 document.getElementById("modal-close")?.addEventListener("click", closeModal);
 document.getElementById("resident-details-close")?.addEventListener("click", closeResidentDetails);
+document.addEventListener("change", (event) => {
+  if (event.target.id === "resident-history-year") {
+    residentHistoryYear = Number(event.target.value);
+    if (document.getElementById("resident-payment-history-content")) renderPaymentHistoryPage();
+    else renderResidentDetails(selectedResidentId);
+    return;
+  }
+  if (!event.target.matches("[data-payment-reference]")) return;
+  const resident = state.residents.find((item) => item.id === event.target.dataset.residentId);
+  if (!resident) return;
+  const monthKey = event.target.dataset.paymentMonth;
+  const reference = event.target.value.trim();
+  resident.paymentReferences = { ...(resident.paymentReferences || {}) };
+  if (reference) resident.paymentReferences[monthKey] = reference;
+  else delete resident.paymentReferences[monthKey];
+  saveState();
+});
 document.getElementById("resident-modal")?.addEventListener("click", (event) => {
   if (event.target.id === "resident-modal") closeModal();
 });
@@ -684,30 +790,23 @@ document.getElementById("notifications-button")?.addEventListener("click", () =>
 document.getElementById("resident-form")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  const latitude = Number(formData.get("latitude"));
-  const longitude = Number(formData.get("longitude"));
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !formData.get("latitude") || !formData.get("longitude")) {
-    showToast("Choose the resident's home on the map first.");
-    return;
-  }
-  const resident = {
+    const resident = {
     ...(editingResidentId ? state.residents.find((item) => item.id === editingResidentId) : {}),
     id: editingResidentId || `resident-${Date.now()}`,
     name: String(formData.get("name")).trim(),
     phone: `+63${philippinesMobileDigits(formData.get("phone"))}`,
     email: String(formData.get("email")).trim(),
-    lot: String(formData.get("lot")).trim().toUpperCase(),
+    block: String(formData.get("block")).trim(),
+    lot: String(formData.get("lot")).trim(),
     street: String(formData.get("street")).trim(),
-    latitude,
-    longitude,
     monthlyDues: Number(formData.get("monthlyDues")),
   };
   if (!/^9\d{9}$/.test(philippinesMobileDigits(formData.get("phone")))) {
     showToast("Enter a valid Philippine mobile number: 10 digits starting with 9.");
     return;
   }
-  if (resident.lot && state.residents.some((item) => item.id !== editingResidentId && item.lot?.toLowerCase() === resident.lot.toLowerCase())) {
-    showToast("That house or lot number is already in use.");
+  if (state.residents.some((item) => item.id !== editingResidentId && item.block === resident.block && item.lot === resident.lot)) {
+    showToast("That block and lot combination is already in use.");
     return;
   }
   if (!Number.isFinite(resident.monthlyDues) || resident.monthlyDues < 0) {
@@ -733,11 +832,13 @@ document.getElementById("settings-form")?.addEventListener("submit", (event) => 
   const communityName = String(formData.get("communityName")).trim();
   const defaultMonthlyDues = Number(formData.get("defaultMonthlyDues"));
   const dueDay = Number(formData.get("dueDay"));
-  if (!communityName || !Number.isFinite(defaultMonthlyDues) || defaultMonthlyDues < 0 || dueDay < 1 || dueDay > 28) {
+  const blockCount = Number(formData.get("blockCount"));
+  const lotCount = Number(formData.get("lotCount"));
+  if (!communityName || !Number.isFinite(defaultMonthlyDues) || defaultMonthlyDues < 0 || dueDay < 1 || dueDay > 28 || !Number.isInteger(blockCount) || blockCount < 1 || blockCount > 100 || !Number.isInteger(lotCount) || lotCount < 1 || lotCount > 500) {
     showToast("Check the community settings and try again.");
     return;
   }
-  state.settings = { ...state.settings, communityName, defaultMonthlyDues, dueDay };
+  state.settings = { ...state.settings, communityName, defaultMonthlyDues, dueDay, blockCount, lotCount };
   saveState();
   document.title = `${communityName} — Settings`;
   document.getElementById("settings-saved").textContent = "Changes saved";
@@ -845,9 +946,7 @@ function authAccountError(error) {
   return error?.message || "Could not update the admin sign-in details.";
 }
 
-document.title = `${document.body.dataset.page === "overview" ? "Overview" : document.body.dataset.page === "map" ? "Community map" : document.body.dataset.page === "payments" ? "Monthly dues" : document.body.dataset.page === "residents" ? "Residents" : document.body.dataset.page === "reports" ? "Reports" : "Settings"} — ${state.settings.communityName}`;
-const mapResident = new URLSearchParams(window.location.search).get("resident");
-if (mapResident) selectedResidentId = mapResident;
+document.title = `${document.body.dataset.page === "overview" ? "Overview" : document.body.dataset.page === "payments" ? "Monthly dues" : document.body.dataset.page === "residents" ? "Residents" : document.body.dataset.page === "reports" ? "Reports" : "Settings"} — ${state.settings.communityName}`;
 async function startApp() {
   try {
     await authReady;
@@ -868,7 +967,6 @@ async function startApp() {
     }
     render();
     revealLoadedData();
-    if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
     if (dataNeedsSaving) {
       saveState();
       dataNeedsSaving = false;
@@ -877,7 +975,6 @@ async function startApp() {
     console.error("Could not connect to Firestore.", error);
     showToast(error.message || "Could not connect to Firestore.");
     render();
-    if (document.getElementById("mini-map") || document.getElementById("full-map")) renderSelectedHome();
   }
 }
 startApp();

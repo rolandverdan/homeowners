@@ -15,7 +15,6 @@ if (content) {
         <a class="nav-link ${page === "overview" ? "active" : ""}" href="dashboard.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="4" rx="1.5"/><rect x="13.5" y="9.5" width="7" height="11" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>Overview</a>
         <a class="nav-link ${page === "residents" ? "active" : ""}" href="residents.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.8 20v-1.5a6.2 6.2 0 0 1 12.4 0V20M16 5.2a3.5 3.5 0 0 1 0 6.7m2 3a5 5 0 0 1 3.2 4.7V20"/></svg></span>Residents</a>
         <a class="nav-link ${page === "payments" ? "active" : ""}" href="payments.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18m-13 5h3"/></svg></span>Monthly dues</a>
-        <a class="nav-link ${page === "map" ? "active" : ""}" href="map.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15m6-12v15"/></svg></span>Property map</a>
         <a class="nav-link ${page === "reports" ? "active" : ""}" href="reports.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 20V10m5 10V4m5 16v-7m5 7V7"/></svg></span>Reports</a>
         <a class="nav-link ${page === "settings" ? "active" : ""}" href="settings.html"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a7.8 7.8 0 0 1-1.8 1l-.3 1.8h-2.8l-.3-1.8a7.8 7.8 0 0 1-1.8-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a7.8 7.8 0 0 1 1.8-1l.3-1.8h2.8l.3 1.8a7.8 7.8 0 0 1 1.8 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z" transform="translate(-1 -1) scale(1.08)"/></svg></span>Settings</a>
       </nav>
@@ -38,17 +37,18 @@ if (content) {
           <label>Full name<input name="name" placeholder="e.g. Jamie Rivera" required maxlength="70" /></label>
           <label>Phone number <span class="phone-input-wrap"><span class="phone-country-code">+63</span><input name="phone" type="text" inputmode="numeric" autocomplete="tel-national" placeholder="9XX XXX XXXX" required pattern="9[0-9]{9}" title="Enter 10 digits starting with 9 after +63." /></span></label>
           <label>Email address<input name="email" type="email" placeholder="e.g. jamie@email.com" maxlength="100" /></label>
-          <label>House / lot number<input name="lot" placeholder="e.g. A-09" maxlength="20" /></label>
+          <label>Block<select name="block" required><option value="">Choose block</option></select></label>
+          <label>Lot<select name="lot" required><option value="">Choose lot</option></select></label>
           <label>Street<input name="street" placeholder="e.g. Acacia Lane" maxlength="60" /></label>
           <label>Monthly dues (₱)<input name="monthlyDues" type="number" min="0" step="50" placeholder="0" required /></label>
-        </div><label class="location-label">Choose home location <span class="location-hint" id="location-hint">Click the map to place a pin.</span><div class="location-picker" id="location-picker" role="application" aria-label="Choose resident location on the map"></div><input type="hidden" name="latitude" required /><input type="hidden" name="longitude" required /></label><div class="form-footer"><p>Monthly dues start as unpaid for the current month.</p><button class="button button-primary" id="resident-submit" type="submit">Add resident</button></div></form>
+        </div><div class="form-footer"><p>Monthly dues start as unpaid for the current month.</p><button class="button button-primary" id="resident-submit" type="submit">Add resident</button></div></form>
       </div>
     </div>
     <div class="modal-backdrop hidden" id="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
       <form class="modal-card export-modal-card" id="export-form">
         <div class="modal-header"><div><h2 id="export-modal-title">Export dues report</h2></div><button class="modal-close" id="export-close" type="button" aria-label="Close dialog">×</button></div>
-        <div class="export-modal-content"><label for="export-month">Choose month and year</label><input id="export-month" name="month" type="month" required /><p>Only payment history recorded in this account is included; older months may be incomplete.</p></div>
-        <div class="export-modal-actions"><button class="button button-secondary" id="export-cancel" type="button">Cancel</button><button class="button button-primary" type="submit">Download CSV</button></div>
+        <div class="export-modal-content"><label for="export-year">Choose year</label><input id="export-year" name="year" type="number" min="2000" step="1" required /><label for="export-block">Choose block</label><select id="export-block" name="block" required><option value="all">All blocks</option></select><p>Export each resident’s payment status for January through December. Paid months include a reference number when one was recorded.</p></div>
+        <div class="export-modal-actions"><button class="button button-secondary" id="export-cancel" type="button">Cancel</button><button class="button button-primary" type="submit">Download Excel report</button></div>
       </form>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>`;

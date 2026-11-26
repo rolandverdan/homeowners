@@ -9,7 +9,7 @@ A static, multi-page community dues dashboard built with vanilla JavaScript and 
 - `dashboard.html` — community overview
 - `residents.html` — resident directory
 - `payments.html` — monthly dues register
-- `map.html` — subdivision lot map
+- `payment-history.html` — resident payment history by month
 - `reports.html` — collection breakdown and CSV export
 - `settings.html` — community settings
 
