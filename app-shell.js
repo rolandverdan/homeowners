@@ -7,7 +7,7 @@ if (content) {
   document.getElementById("app-shell").innerHTML = `
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="dashboard.html" aria-label="Bistek Village dashboard">
-        <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M5 15.1 16 6l11 9.1v11.2a1.7 1.7 0 0 1-1.7 1.7h-5.8v-8.5h-7v8.5H6.7A1.7 1.7 0 0 1 5 26.3V15.1Z" fill="currentColor"/><path d="m3.7 14.8 11.2-9.4a1.8 1.8 0 0 1 2.2 0l11.2 9.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+        <span class="brand-mark"><img src="./images/logo.jpg" alt="" aria-hidden="true" /></span>
         <span class="brand-name">Home Owners Association<span>.</span><small>BISTEK VILLAGE ADMIN</small></span>
       </a>
       <div class="side-label">WORKSPACE</div>

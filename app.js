@@ -303,20 +303,30 @@ function render() {
     renderOverviewTable();
   }
 
-  setText("report-period", currentMonth);
+  const reportMonthKey = selectedReportMonth();
+  const reportMonthLabel = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(`${reportMonthKey}-01T00:00:00`));
+  const reportPaidResidents = state.residents.filter((resident) => isPaidForMonth(resident, reportMonthKey));
+  const reportUnpaidResidents = state.residents.filter((resident) => !isPaidForMonth(resident, reportMonthKey));
+  const reportDueResidents = reportUnpaidResidents.filter((resident) => paymentStatusForMonth(resident, reportMonthKey) === "Due soon");
+  const reportOverdueResidents = reportUnpaidResidents.filter((resident) => paymentStatusForMonth(resident, reportMonthKey) === "Overdue");
+  const reportCollected = reportPaidResidents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+  const reportRate = total ? Math.round(reportCollected / total * 100) : 0;
+  setText("report-period", reportMonthLabel);
+  setText("report-stat-period", reportMonthLabel);
   setText("report-expected", formatCurrency(total));
-  setText("report-collected", formatCurrency(paidTotal));
-  setText("report-outstanding", formatCurrency(outstanding));
-  setText("report-paid-count", `${paidResidents.length} payments recorded`);
-  setText("report-due-count", `${pendingResidents.length} payments pending`);
-  setText("report-rate", rate);
-  setWidth("report-progress", rate);
-  setText("donut-rate", `${rate}%`);
+  setText("report-collected", formatCurrency(reportCollected));
+  setText("report-outstanding", formatCurrency(total - reportCollected));
+  setText("report-paid-count", `${reportPaidResidents.length} payments recorded`);
+  setText("report-due-count", `${reportUnpaidResidents.length} payments pending`);
+  setText("report-rate", reportRate);
+  setWidth("report-progress", reportRate);
+  setText("donut-rate", `${reportRate}%`);
   const donut = document.getElementById("report-donut");
-  if (donut) animateFill(donut, rate, "--collection-rate");
-  setText("report-legend-paid", `${paidResidents.length} residents · ${formatCurrency(paidTotal)}`);
-  setText("report-legend-due", `${dueCount} residents · ${formatCurrency(pendingResidents.filter((resident) => paymentStatus(resident) === "due").reduce((sum, resident) => sum + Number(resident.monthlyDues), 0))}`);
-  setText("report-legend-late", `${overdueCount} residents · ${formatCurrency(pendingResidents.filter((resident) => paymentStatus(resident) === "overdue").reduce((sum, resident) => sum + Number(resident.monthlyDues), 0))}`);
+  if (donut) animateFill(donut, reportRate, "--collection-rate");
+  setText("report-legend-paid", `${reportPaidResidents.length} residents · ${formatCurrency(reportCollected)}`);
+  setText("report-legend-due", `${reportDueResidents.length} residents · ${formatCurrency(reportDueResidents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0))}`);
+  setText("report-legend-late", `${reportOverdueResidents.length} residents · ${formatCurrency(reportOverdueResidents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0))}`);
+  renderReportsTables(reportMonthKey, reportMonthLabel);
 
   const residentSearch = document.getElementById("resident-search");
   if (residentSearch) renderResidentsTable(residentSearch.value);
@@ -325,6 +335,59 @@ function render() {
   const pageCount = document.getElementById("resident-page-count");
   if (pageCount) pageCount.textContent = `All residents · ${state.residents.length}`;
   renderPaymentHistoryPage();
+}
+
+function selectedReportMonth() {
+  const picker = document.getElementById("report-month-picker");
+  if (!picker) return currentMonthKey;
+  if (!picker.value) picker.value = currentMonthKey;
+  picker.max = currentMonthKey;
+  if (!/^\d{4}-\d{2}$/.test(picker.value) || picker.value > currentMonthKey) picker.value = currentMonthKey;
+  return picker.value;
+}
+
+function renderReportsTables(monthKey, monthLabel) {
+  const blockTable = document.getElementById("report-block-table");
+  if (blockTable) {
+    const blocks = new Map();
+    for (const resident of state.residents) {
+      const block = resident.block ? `Block ${resident.block}` : "Unassigned";
+      if (!blocks.has(block)) blocks.set(block, []);
+      blocks.get(block).push(resident);
+    }
+    const sortedBlocks = [...blocks.entries()].sort(([a], [b]) => {
+      if (a === "Unassigned") return 1;
+      if (b === "Unassigned") return -1;
+      return Number(a.slice(6)) - Number(b.slice(6));
+    });
+    blockTable.innerHTML = sortedBlocks.map(([block, residents]) => {
+      const expected = residents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+      const collected = residents.filter((resident) => isPaidForMonth(resident, monthKey)).reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+      const rate = expected ? Math.round(collected / expected * 100) : 0;
+      return `<tr><td class="property-cell">${escapeHTML(block)}</td><td>${residents.length}</td><td class="amount-cell">${formatCurrency(expected)}</td><td class="amount-cell">${formatCurrency(collected)}</td><td class="amount-cell">${formatCurrency(expected - collected)}</td><td><div class="report-rate-cell"><span>${rate}%</span><div class="report-rate-track"><i style="width:${rate}%"></i></div></div></td></tr>`;
+    }).join("");
+    document.getElementById("report-block-empty")?.classList.toggle("hidden", sortedBlocks.length > 0);
+    const period = document.getElementById("report-block-period");
+    if (period) period.textContent = monthLabel;
+  }
+
+  const monthTable = document.getElementById("report-month-table");
+  if (!monthTable) return;
+  const currentYear = today.getFullYear();
+  const currentMonthNumber = today.getMonth() + 1;
+  document.getElementById("report-year-label").textContent = String(currentYear);
+  monthTable.innerHTML = Array.from({ length: currentMonthNumber }, (_, index) => {
+    const monthNumber = index + 1;
+    const monthKey = `${currentYear}-${String(monthNumber).padStart(2, "0")}`;
+    const paidResidents = state.residents.filter((resident) => isPaidForMonth(resident, monthKey));
+    const unpaidResidents = state.residents.filter((resident) => !isPaidForMonth(resident, monthKey));
+    const overdueResidents = unpaidResidents.filter((resident) => paymentStatusForMonth(resident, monthKey) === "Overdue");
+    const expected = state.residents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+    const collected = paidResidents.reduce((sum, resident) => sum + Number(resident.monthlyDues || 0), 0);
+    const rate = expected ? Math.round(collected / expected * 100) : 0;
+    const monthLabel = new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(currentYear, index, 1));
+    return `<tr><td>${monthLabel} ${currentYear}</td><td>${paidResidents.length}</td><td>${unpaidResidents.length}</td><td>${overdueResidents.length}</td><td class="amount-cell">${formatCurrency(collected)}</td><td><div class="report-rate-cell"><span>${rate}%</span><div class="report-rate-track"><i style="width:${rate}%"></i></div></div></td></tr>`;
+  }).join("");
 }
 
 function propertyLabel(resident) {
@@ -738,6 +801,7 @@ document.getElementById("payment-search")?.addEventListener("input", (event) => 
 document.getElementById("payment-block-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
 document.getElementById("payment-status-filter")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
 document.getElementById("payment-month-picker")?.addEventListener("change", () => { tablePages.payments = 1; renderPaymentsTable(document.getElementById("payment-search")?.value || ""); });
+document.getElementById("report-month-picker")?.addEventListener("change", render);
 document.querySelector('#resident-form [name="phone"]')?.addEventListener("input", (event) => {
   const input = event.currentTarget;
   let digits = input.value.replace(/\D/g, "");
